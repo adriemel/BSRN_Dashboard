@@ -1,0 +1,25 @@
+[ftp]
+host = ftp.bsrn.awi.de
+protocol = ftps
+remote_root = /
+user = anonymous
+password = anonymous@
+timeout_seconds = 60
+
+# BSRN_FTP_USER and BSRN_FTP_PASSWORD environment variables override
+# user/password when set. Keep real credentials in ignored local config
+# or environment variables, never in Git.
+
+[paths]
+output_root = output
+ids_dir = tools/create-importfiles
+dashboard = dashboard.html
+
+[tools]
+# Optional trusted precompiled checker executable. Leave blank unless the
+# executable has been approved by local antivirus/application-control policy.
+# If omitted, the workflow compiles tools/format-check/f_check_V3_4.c into
+# the current output folder only when allow_compile_format_checker is true
+# or --force-compile is passed.
+format_checker_exe =
+allow_compile_format_checker = false

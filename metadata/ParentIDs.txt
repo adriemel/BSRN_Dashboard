@@ -1,0 +1,63 @@
+Acronym	ParentID	Comment
+abs	974699	
+ale	932867	
+asp	987241	
+bar	959215	
+bon	987242	
+bou	932929	
+bud	946379	
+cab	940531	
+cam	945262	
+car	932930	
+clh	933174	
+cnr	931893	
+coc	987244	
+daa	987245	
+dom	935421	
+dra	987246	
+dwn	987247	
+e13	967083	
+eur	933177	
+flo	974493	
+fpe	987248	
+fua	968880	
+gcr	987249	
+gim	971609	
+gob	968639	
+gur	987250	
+gvn	932418	# GVN_SYNOP = 911242, GVN_expanded = 963582
+how	987251	
+ilo	914421	
+ino	946380	
+ish	972475	
+iza	968676	
+lau	987253	
+ler	945264	
+lin	946382	
+lmp	973604	
+lrc	971610	
+lyu	980501	
+mnm	973454	
+nya	914927	# LR1300: "ParentID": 942331,
+pal	946383	
+par	979681	
+pay	946384	
+psu	987254	
+ptr	987255	
+run	962049	
+sap	938654	
+sbo	932871	
+sel	971683	# Dataset in PANGAEA has additional authors!
+sms	987256	
+son	946389	
+sov	932870	
+spo	956847	
+sxf	987257	
+syo	956748	
+tam	965124	# Dataset in PANGAEA has additional authors!
+tat	968727	
+tik	959213	
+tir	987258	
+tor	946387	
+xia	931828	
+yus	931894	

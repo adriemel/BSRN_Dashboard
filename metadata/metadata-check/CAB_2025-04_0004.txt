@@ -1,0 +1,2 @@
+File name	Station ID	Event label	Station	YYYY-MM	Surface type	Topography type
+cab0425.dat	53	CAB	Cabauw	2025-04	15	2

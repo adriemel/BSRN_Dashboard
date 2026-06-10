@@ -1,0 +1,1 @@
+File name	Station ID	Event label	Station	YYYY-MM	Manufacturer	Location	Distance from radiation site [km]	Identification number of ozone instrument	Remarks	PANGAEA Method ID

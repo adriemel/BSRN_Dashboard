@@ -1,0 +1,2 @@
+File name	Station ID	Event label	Station	YYYY-MM	Date/Time when change occured	Method est. cloud amount (digital proc.)	Method est. cloud height (with instrument)	Method est. cloud liquid water cont.	Method est. cloud aerosol vertical distr.	Method est. water vapor pressure v. d.	SYNOP flags
+cab0425.dat	53	CAB	Cabauw	2025-04							N N N N N N

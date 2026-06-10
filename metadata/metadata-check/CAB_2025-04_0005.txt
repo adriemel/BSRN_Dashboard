@@ -1,0 +1,1 @@
+File name	Station ID	Event label	Station	YYYY-MM	Manufacturer	Location	Distance from radiation site [km]	Time of 1st launch [hh]	Time of 2nd launch [hh]	Time of 3rd launch [hh]	Time of 4th launch [hh]	Identification of radiosonde	Remarks	PANGAEA method	PANGAEA method ID

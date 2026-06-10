@@ -1,0 +1,3 @@
+File name	Station ID	Event label	Station	YYYY-MM	Position	Scientist	Telephon	Fax	TCP/IP	e-mail	Address	PANGAEA staff ID
+cab0425.dat	53	CAB	Cabauw	2025-04	1	Dr. Wouter H. Knap	+31302206469	+31302202570	145.23.254.254	wouter.knap@knmi.nl	KNMI, PO Box 201, 3730 AE De Bilt, the Netherlands	31652
+cab0425.dat	53	CAB	Cabauw	2025-04	2	XXX	XXX	XXX	XXX	XXX	XXX

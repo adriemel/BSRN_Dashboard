@@ -1,0 +1,10 @@
+# Runtime packages used by the BSRN dashboard, QC reports, and import workflow.
+# Keep versions reviewed during deployment; the bundled Codex runtime may already
+# provide these packages.
+numpy
+pandas
+matplotlib
+Jinja2
+plotly
+requests
+openpyxl

@@ -1,0 +1,31 @@
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Local credentials and machine-specific workflow configuration.
+config/bsrn_workflow.ini
+config/*.local.ini
+
+# Generated workflow output and local dashboard snapshots.
+output/
+dashboard.html
+
+# Large local station input files. Keep only explicit regression fixtures tracked.
+input/*.dat
+!input/tat0426.dat
+
+# Local logs and temporary runtime files.
+*.log
+*.traceback.txt
+.pytest_cache/
+
+# Legacy/native checker build artifacts must not be committed.
+*.exe
+tools/format-check/bin/
+
+# Curator specific information
+/human-workflow.md
+/plan-milestones.md
+/milestones.md
+/project.md
+/start-download.md

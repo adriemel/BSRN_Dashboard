@@ -37,7 +37,6 @@ from scripts.bsrn_download_check import (  # noqa: E402
 )
 from scripts.bsrn_qc_continue import (  # noqa: E402
     extract_optional_logical_records,
-    lr1000_station_format,
 )
 from scripts.bsrn_station_registry import resolve_station_entry  # noqa: E402
 
@@ -323,6 +322,13 @@ def as_float(text: str) -> float | None:
     return value
 
 
+def as_lr0300_net_float(text: str) -> float | None:
+    value = as_float(text)
+    if value is None:
+        return None
+    return None if value <= -99.0 else value
+
+
 def as_int(text: str) -> int | None:
     try:
         return int(text)
@@ -432,7 +438,7 @@ def method_for_quantity(meta: StationJobMetadata, lr0009: list[dict[str, object]
     comment = ""
     if len(matches) > 1:
         comment = f"Changed to WRMC No. {last['wrmc_id']} at {last['datetime']}"
-    return lookup.method_id(meta.station_id, int(first["wrmc_id"])), comment
+    return lookup.method_id(meta.station_id, int(first["wrmc_id"]), default=-999), comment
 
 
 def declared_lr0001_parameters(blocks: dict[str, list[str]]) -> set[int]:
@@ -536,7 +542,7 @@ def parse_lr0300_rows(blocks: dict[str, list[str]], meta: StationJobMetadata) ->
         if day is None or minute is None:
             continue
         timestamp = make_datetime(meta.year, meta.month, day, minute)
-        rows[timestamp] = {
+        row = {
             "SWU": as_float(parts[2]),
             "SWU_sd": as_float(parts[3]),
             "SWU_min": as_float(parts[4]),
@@ -546,6 +552,16 @@ def parse_lr0300_rows(blocks: dict[str, list[str]], meta: StationJobMetadata) ->
             "LWU_min": as_float(parts[8]),
             "LWU_max": as_float(parts[9]),
         }
+        if len(parts) >= 14:
+            row.update(
+                {
+                    "NET": as_lr0300_net_float(parts[10]),
+                    "NET_sd": as_float(parts[11]),
+                    "NET_min": as_lr0300_net_float(parts[12]),
+                    "NET_max": as_lr0300_net_float(parts[13]),
+                }
+            )
+        rows[timestamp] = row
     return rows
 
 
@@ -565,6 +581,7 @@ def generate_lr0100_0300(status: JobStatus, meta: StationJobMetadata, blocks: di
         (5, [("LWD", 45298, "###0"), ("LWD_sd", 55908, "###0.0"), ("LWD_min", 55909, "###0"), ("LWD_max", 55910, "###0")]),
         (131, [("SWU", 55911, "###0"), ("SWU_sd", 55912, "###0.0"), ("SWU_min", 55913, "###0"), ("SWU_max", 55914, "###0")]),
         (132, [("LWU", 45299, "###0"), ("LWU_sd", 55915, "###0.0"), ("LWU_min", 55916, "###0"), ("LWU_max", 55917, "###0")]),
+        (141, [("NET", 55918, "###0"), ("NET_sd", 55919, "###0.0"), ("NET_min", 55920, "###0"), ("NET_max", 55921, "###0")]),
     ]
     fields: list[tuple[str, int, str, int, str]] = []
     for quantity, group in specs:
@@ -670,13 +687,22 @@ SYNOP_FIELDS: list[tuple[str, int, str, int, str]] = [
 ]
 
 
+SYNOP_GROUP_FORMAT_COMMENTS = {
+    1: "YYGG9 IIiii Nddff 1SnTTT 2SnTdTdTd 3P0P0P0 4PPPP 7wwW1W2 8NhClCmCh 333 8NsChshs 8NsChshs 8NsChshs",
+    3: "YYGG9 IIiii Nddff 1SnTTT 2SnTdTdTd 3P0P0P0 4PPPP 7wwW1W2 8NhClCmCh 333 8NChshsh 8NChshsh 8NChshsh",
+    4: "YYGG9 IIiii iRixhVV Nddff 1SnTTT 2SnTdTdTd 3P0P0P0 4PPPP 7wwW1W2 8NhClCmCh 333 8NsChshs 8NsChshs 8NsChshs",
+    5: "YYGG9 IIiii Nddff 1SnTTT 2SnTdTdTd 3P0P0P0 4PPPP 7wwW1W2 8NhClCmCh 333 8NsChshs 8NsChshs 8NsChshs",
+}
+
+
 def generate_lr1000(meta: StationJobMetadata, rows: list[dict[str, object]], out_dir: Path) -> Path | None:
     if not rows:
         return None
+    synop_format = next((row.get("SYNOP format") for row in rows if isinstance(row.get("SYNOP format"), int)), None)
     fields = active_fields(rows, SYNOP_FIELDS)
-    if len(fields) > 1:
+    if len(fields) > 1 and synop_format not in SYNOP_GROUP_FORMAT_COMMENTS:
         fields = [field for field in fields if field[0] != "FM 12-XII Ext. SYNOP code"]
-    if lr1000_station_format(meta.event_label) == 2:
+    if synop_format == 2:
         fields = normalize_lr1000_format2_fields(fields)
     if not fields:
         return None
@@ -688,7 +714,9 @@ def generate_lr1000(meta: StationJobMetadata, rows: list[dict[str, object]], out
             fmt,
             method,
             "Station pressure reduced to sea level"
-            if label == "Pressure, atmospheric [hPa]" and lr1000_station_format(meta.event_label) in {2, 6}
+            if label == "Pressure, atmospheric [hPa]" and synop_format in {2, 6}
+            else SYNOP_GROUP_FORMAT_COMMENTS.get(int(synop_format), "")
+            if label == "FM 12-XII Ext. SYNOP code" and isinstance(synop_format, int)
             else comment,
         )
         for label, pid, fmt, method, comment in fields

@@ -347,6 +347,8 @@ def parse_lr1000(
         return parse_lr1000_format6(clean_lines, year, month, station_code, latitude, longitude)
     if synop_format in {1, 3, 4, 5}:
         return parse_lr1000_synop_groups(clean_lines, year, month, station_code, latitude, longitude, synop_format)
+    if lr1000_looks_like_fm12_synop_groups(clean_lines):
+        return parse_lr1000_synop_groups(clean_lines, year, month, station_code, latitude, longitude, 1)
 
     rows = []
     for index, line in enumerate(clean_lines, start=1):
@@ -371,6 +373,38 @@ def lr1000_station_format(station_code: str) -> int | None:
     if station in {"gvn", "nya"}:
         return 6
     return None
+
+
+def lr1000_looks_like_fm12_synop_groups(lines: list[str]) -> bool:
+    """Recognize standard YYGGiw IIiii Nddff FM-12 SYNOP groups.
+
+    The original Tool 1 converter has explicit station dispatch for several
+    LR1000 layouts. Some valid stations publish standard FM-12 SYNOP groups
+    without being present in that older station list, so this fallback applies
+    the documented group grammar rather than a station/month-specific override.
+    """
+
+    data_lines = [line.strip() for line in lines if line.strip()]
+    if not data_lines:
+        return False
+    checked = 0
+    for line in data_lines:
+        parts = line.split()
+        if len(parts) < 8:
+            return False
+        if not all(len(part) == 5 for part in parts[:8]):
+            return False
+        first, station_group, wind_group = parts[0], parts[1], parts[2]
+        if not (first[:4].isdigit() and first[4] in "0123456789/"):
+            return False
+        if not station_group.isdigit():
+            return False
+        if not (wind_group[0] in "0123456789/" and all(char.isdigit() or char == "/" for char in wind_group[1:])):
+            return False
+        checked += 1
+        if checked >= 20:
+            break
+    return True
 
 
 def parse_lr1000_format2(

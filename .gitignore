@@ -18,6 +18,8 @@ input/*.dat
 *.log
 *.traceback.txt
 .pytest_cache/
+.import_regression_tmp/
+.security_regression_tmp/
 
 # Legacy/native checker build artifacts must not be committed.
 *.exe

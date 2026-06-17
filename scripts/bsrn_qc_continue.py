@@ -83,8 +83,7 @@ def write_qc_exception_log(qc_root: Path, status: JobStatus, exc: BaseException)
 
 
 def eligible_for_qc(status: JobStatus) -> bool:
-    qc_errors = [error for error in status.errors if error.startswith("QC error:")]
-    return bool(status.dat_path and not qc_errors)
+    return bool(status.dat_path)
 
 
 def run_qc_for_dat(dat_path: Path, qc_root: Path, include_static_report: bool = False) -> tuple[Path, list[Path], list[str]]:
@@ -745,7 +744,7 @@ def clean_number(value: str) -> float | None:
         number = float(value)
     except ValueError:
         return None
-    if number in {-999.0, -9999.0, -99.9, -9.9}:
+    if number in {-999.0, -9999.0, -99.9}:
         return None
     return number
 

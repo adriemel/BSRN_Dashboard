@@ -788,7 +788,7 @@ def render_dashboard() -> str:
       else if (row.action_kind === 'curator') {{
         actions.appendChild(postForm('/approve-qc', 'Approve QC', {{job: row.job}}));
         actions.appendChild(rejectForm(row.job));
-      }} else if (row.action_kind === 'ready') actions.appendChild(postForm('/generate-import-files', 'Generate import files'));
+      }} else if (row.action_kind === 'ready') actions.appendChild(postForm('/generate-import-files', 'Generate import files', {{job: row.job}}));
       else if (row.action_kind === 'import_done') row.import_artifacts.forEach(item => actions.appendChild(el('a', {{class: 'pill', href: item.href}}, item.label)));
       else actions.appendChild(el('p', {{}}, row.gate_detail || 'No action available.'));
       node.appendChild(actions);
@@ -1003,7 +1003,12 @@ def render_row(row: dict) -> str:
           <button type="submit" class="secondary">Reject QC</button>
         </form>"""
     elif action == "ready":
-        action_html = f'<form method="post" action="/generate-import-files">{csrf_input()}<button type="submit">Generate import files</button></form>'
+        job = html.escape(str(row.get("job") or ""), quote=True)
+        action_html = (
+            f'<form method="post" action="/generate-import-files">{csrf_input()}'
+            f'<input type="hidden" name="job" value="{job}">'
+            '<button type="submit">Generate import files</button></form>'
+        )
     elif action == "import_done":
         action_html = import_html
     elif action == "qc_links":
@@ -1378,7 +1383,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self.handle_curator_decision(form, "rejected")
             return
         if parsed.path == "/generate-import-files":
-            self.handle_generate_import_files()
+            self.handle_generate_import_files(form)
             return
         self.send_error(HTTPStatus.NOT_FOUND, "Unknown action")
 
@@ -1436,7 +1441,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
         update_reference_ids_for_current_status()
         self.redirect_home()
 
-    def handle_generate_import_files(self) -> None:
+    def handle_generate_import_files(self, form: dict[str, list[str]]) -> None:
         command = [
             sys.executable,
             str(PROJECT_ROOT / "scripts" / "bsrn_import_files.py"),
@@ -1445,6 +1450,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
             "--dashboard",
             str(DASHBOARD_PATH),
         ]
+        job = first_value(form, "job")
+        if job:
+            command.extend(["--job", job])
         run_command("Generate import files", command)
         self.redirect_home()
 

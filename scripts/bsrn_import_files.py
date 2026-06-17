@@ -45,7 +45,7 @@ DATA_RECORDS_EXCLUDED = {"4000"}
 METADATA_RECORDS = {f"{record:04d}" for record in range(1, 10)}
 TOOL1_IMPORT_RECORDS = {"0100", "0300", "0500", "1000", "1100", "1200", "1300", "3010", "3030", "3300"}
 SUPPORTED_RECORDS = {"0100", "0300", "0500", "1000", "1100", "1200", "1300", "3010", "3030"}
-MISSING_SENTINELS = {"", "-9.9", "-99.9", "-999", "-999.0", "-9999", "-9999.0"}
+MISSING_SENTINELS = {"", "-99.9", "-999", "-999.0", "-9999", "-9999.0"}
 
 
 class ImportWorkflowError(Exception):
@@ -317,7 +317,7 @@ def as_float(text: str) -> float | None:
         value = float(text)
     except (TypeError, ValueError):
         return None
-    if value in {-999.0, -9999.0, -99.9, -9.9}:
+    if value in {-999.0, -9999.0, -99.9}:
         return None
     return value
 
@@ -1156,10 +1156,15 @@ def run_import_generation(args: argparse.Namespace) -> int:
 
     statuses = load_statuses(status_path)
     decisions = load_curator_decisions(run_root)
+    selected_jobs = {job.strip().upper() for job in (args.job or []) if job.strip()}
+    existing_jobs = {status.job.upper() for status in statuses}
+    missing_selected_jobs = sorted(selected_jobs - existing_jobs)
     attempted = 0
     generated = 0
 
     for status in statuses:
+        if selected_jobs and status.job.upper() not in selected_jobs:
+            continue
         status.import_warnings = []
         status.import_outputs = []
         status.import_ok = False
@@ -1189,10 +1194,12 @@ def run_import_generation(args: argparse.Namespace) -> int:
         "status_json": rel_path(status_path),
         "attempted_rows": attempted,
         "generated_rows": generated,
+        "selected_jobs": sorted(selected_jobs),
+        "missing_selected_jobs": missing_selected_jobs,
         "blocked_rows": [
             {"job": status.job, "warnings": status.import_warnings}
             for status in statuses
-            if not status.import_ok and status.import_warnings
+            if (not selected_jobs or status.job.upper() in selected_jobs) and not status.import_ok and status.import_warnings
         ],
     }
     summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
@@ -1203,6 +1210,8 @@ def run_import_generation(args: argparse.Namespace) -> int:
     print(f"Import artifacts: {import_root}")
     print(f"Status JSON:      {status_path}")
     print(f"Dashboard:        {dashboard_path}")
+    if missing_selected_jobs:
+        print(f"Missing jobs:     {', '.join(missing_selected_jobs)}")
     return 0 if generated else 1
 
 
@@ -1212,6 +1221,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ids-dir", help="Directory containing BSRN_IDs.txt; defaults to tools/create-importfiles")
     parser.add_argument("--import-dir", help="Output directory; defaults to <run>/import_files")
     parser.add_argument("--dashboard", help="Central dashboard path; defaults to BSRN/dashboard.html")
+    parser.add_argument("--job", action="append", help="Limit generation to one status row job label, e.g. BON_2025-01; repeatable")
     return parser
 
 

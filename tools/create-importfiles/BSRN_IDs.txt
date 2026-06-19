@@ -8,9 +8,9 @@ BSRN Station ID	PANGAEA Event label	Full name	PANGAEA Institute ID
 22	BAR	Barrow	1809
 24	BER	Bermuda	1809
 28	BIL	Billings	2876
-32	BON	Bondville	2887
+32	BON	Bondville	21131
 34	BOS	Boulder, SURFRAD	2887
-23	BOU	Boulder	2887
+23	BOU	Boulder	21131
 71	BRB	Brazilia	2901
 14	BUD	Budapest	3032
 53	CAB	Cabauw	1057
@@ -25,7 +25,7 @@ BSRN Station ID	PANGAEA Event label	Full name	PANGAEA Institute ID
 2	DAR	Darwin	2888
 74	DOM	Concordia Station	2963
 55	DON	Dongsha Atoll	17
-35	DRA	Desert Rock	2887
+35	DRA	Desert Rock	21131
 65	DWN	Darwin Met Office	2894
 27	E13	Southern Great Plains	2876
 77	ENA	Eastern North Atlantic	20506
@@ -34,7 +34,7 @@ BSRN Station ID	PANGAEA Event label	Full name	PANGAEA Institute ID
 31	FPE	Fort Peck	2887
 6	FUA	Fukuoka	1671
 58	GAN	Gandhinagar	20599
-33	GCR	Goodwin Creek	2887
+33	GCR	Goodwin Creek	21131
 78	GIM	Granite Island	2891
 20	GOB	Gobabeb	21604
 56	GUR	Gurgaon	20599
@@ -63,7 +63,7 @@ BSRN Station ID	PANGAEA Event label	Full name	PANGAEA Institute ID
 66	PAR	Paramaribo	1057
 21	PAY	Payerne	21035
 76	PSA	Plataforma Solar de Almeria	20296
-36	PSU	Rock Springs	2887
+36	PSU	Rock Springs	21131
 72	PTR	Petrolina	2901
 5	REG	Regina	2895
 94	QIQ	Qiqihar	22007
@@ -76,7 +76,7 @@ BSRN Station ID	PANGAEA Event label	Full name	PANGAEA Institute ID
 75	SON	Sonnblick	21082
 41	SOV	Solar Village	2882
 26	SPO	South Pole	21131
-37	SXF	Sioux Falls	2887
+37	SXF	Sioux Falls	21131
 17	SYO	Syowa	1671
 42	TAM	Tamanrasset	2893
 16	TAT	Tateno	2877

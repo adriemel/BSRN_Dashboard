@@ -148,7 +148,7 @@ def test_import_generation_without_job_filter_processes_all_ready_rows() -> None
 
     clean_test_tmp()
     run_root = TEST_TMP / "batch_import"
-    import_root = run_root / "import_files"
+    import_root = run_root / "importfiles"
     status_path = run_root / "status.json"
     dashboard_path = run_root / "dashboard.html"
     run_root.mkdir(parents=True, exist_ok=True)
@@ -166,7 +166,7 @@ def test_import_generation_without_job_filter_processes_all_ready_rows() -> None
 
     def fake_generate(status, import_root_arg, ids_dir):
         generated_jobs.append(status.job)
-        path = import_root_arg / status.job / f"{status.job}_dummy_imp.txt"
+        path = import_root_arg / f"{status.job}_dummy_imp.txt"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("dummy\n", encoding="utf-8")
         return [path], []
@@ -176,7 +176,7 @@ def test_import_generation_without_job_filter_processes_all_ready_rows() -> None
         args = argparse.Namespace(
             status=str(status_path),
             ids_dir=str(PROJECT_ROOT / "tools" / "create-importfiles"),
-            import_dir=str(import_root),
+            import_dir=None,
             dashboard=str(dashboard_path),
             job=None,
         )
@@ -185,9 +185,12 @@ def test_import_generation_without_job_filter_processes_all_ready_rows() -> None
         importer.generate_imports_for_status = original_generate
 
     assert generated_jobs == ["AAA_2026-01", "BBB_2026-01"]
-    summary = json.loads((import_root / "import_generation_summary.json").read_text(encoding="utf-8"))
-    assert summary["generated_rows"] == 2
-    assert summary["selected_jobs"] == []
+    rows = json.loads(status_path.read_text(encoding="utf-8"))
+    assert [Path(output).parent.name for row in rows for output in row["import_outputs"]] == ["importfiles", "importfiles"]
+    assert sorted(path.name for path in import_root.iterdir()) == ["AAA_2026-01_dummy_imp.txt", "BBB_2026-01_dummy_imp.txt"]
+    assert not any(import_root.glob("*_import_generation_manifest.json"))
+    assert not (import_root / "import_generation_summary.json").exists()
+    assert not any(path.is_dir() for path in import_root.iterdir())
 
 
 if __name__ == "__main__":

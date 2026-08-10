@@ -1735,6 +1735,132 @@ def batch_metadata_artifacts(statuses: list[JobStatus]) -> list[tuple[str, Path]
     return artifacts
 
 
+def loading_overlay_css() -> str:
+    return """
+    .loading-overlay { position: fixed; inset: 0; display: none; place-items: center; padding: 1.5rem; background: rgba(237,244,244,.72); backdrop-filter: blur(2px); z-index: 1000; }
+    .loading-overlay.open { display: grid; }
+    body.loading-active { overflow: hidden; }
+    body.loading-active .topbar, body.loading-active .layout { filter: blur(1px); }
+    .loading-panel { display: grid; justify-items: center; gap: .85rem; width: min(22rem, 92vw); padding: 1.35rem 1.5rem; border: 1px solid rgba(172,196,212,.92); border-radius: 8px; background: rgba(255,255,255,.88); box-shadow: 0 18px 42px rgba(18,52,60,.18); text-align: center; }
+    .loading-sun { width: clamp(5rem, 18vw, 7.5rem); height: auto; overflow: visible; }
+    .loading-sun .sun-rays { transform-origin: 60px 60px; animation: bsrn-rays-spin 8s linear infinite; }
+    .loading-sun .sun-core { transform-origin: 60px 60px; animation: bsrn-sun-breathe 2.8s ease-in-out infinite; }
+    .loading-status { color: var(--text); font-size: 15px; font-weight: 800; }
+    @keyframes bsrn-rays-spin { to { transform: rotate(360deg); } }
+    @keyframes bsrn-sun-breathe { 0%, 100% { transform: scale(.96); opacity: .9; } 50% { transform: scale(1.04); opacity: 1; } }
+    @media (prefers-reduced-motion: reduce) {
+      .loading-sun .sun-rays, .loading-sun .sun-core { animation: none; }
+      .loading-overlay { backdrop-filter: none; }
+    }
+"""
+
+
+def loading_overlay_html() -> str:
+    return """
+  <div class="loading-overlay" id="workflowLoadingOverlay" aria-hidden="true">
+    <div class="loading-panel" role="status" aria-live="polite" aria-atomic="true">
+      <svg class="loading-sun" viewBox="0 0 120 120" aria-hidden="true" focusable="false">
+        <g class="sun-rays" fill="none" stroke="#ffbd3d" stroke-width="5" stroke-linecap="round">
+          <line x1="60" y1="10" x2="60" y2="24"></line>
+          <line x1="60" y1="96" x2="60" y2="110"></line>
+          <line x1="10" y1="60" x2="24" y2="60"></line>
+          <line x1="96" y1="60" x2="110" y2="60"></line>
+          <line x1="24.6" y1="24.6" x2="34.5" y2="34.5"></line>
+          <line x1="85.5" y1="85.5" x2="95.4" y2="95.4"></line>
+          <line x1="24.6" y1="95.4" x2="34.5" y2="85.5"></line>
+          <line x1="85.5" y1="34.5" x2="95.4" y2="24.6"></line>
+        </g>
+        <circle cx="60" cy="60" r="27" fill="#ffbd3d" opacity=".22"></circle>
+        <circle class="sun-core" cx="60" cy="60" r="22" fill="#ffbd3d" stroke="#d69a20" stroke-width="2"></circle>
+      </svg>
+      <div class="loading-status" id="workflowLoadingMessage">Processing...</div>
+    </div>
+  </div>
+"""
+
+
+def loading_overlay_script() -> str:
+    return """
+    let workflowLoadingActive = false;
+    function dashboardLoadingMessageForAction(action, label = '') {
+      const path = String(action || '').split('?', 1)[0].toLowerCase();
+      const text = String(label || '').toLowerCase();
+      if (path.endsWith('/run-download') || text.includes('run download') || text.includes('download/check')) return 'Downloading BSRN files...';
+      if (path.endsWith('/continue-qc') || path.endsWith('continue_qc.cmd') || text.includes('continue to qc')) return 'Checking BSRN data...';
+      if (path.endsWith('/export-data') || path.endsWith('export_data.cmd') || text.includes('export data') || text.includes('export all data')) return 'Exporting data...';
+      if (path.endsWith('/generate-import-files') || text.includes('generate import')) return 'Creating import file...';
+      return '';
+    }
+    function showWorkflowLoading(message) {
+      const overlay = document.getElementById('workflowLoadingOverlay');
+      const messageNode = document.getElementById('workflowLoadingMessage');
+      if (!overlay || !messageNode) return;
+      messageNode.textContent = message || 'Processing...';
+      overlay.classList.add('open');
+      overlay.setAttribute('aria-hidden', 'false');
+      document.body.classList.add('loading-active');
+    }
+    function hideWorkflowLoading() {
+      const overlay = document.getElementById('workflowLoadingOverlay');
+      if (overlay) {
+        overlay.classList.remove('open');
+        overlay.setAttribute('aria-hidden', 'true');
+      }
+      document.querySelectorAll('form[data-loading="true"]').forEach(form => {
+        delete form.dataset.loading;
+        form.removeAttribute('aria-busy');
+      });
+      document.querySelectorAll('button[data-loading-disabled-by-overlay="true"]').forEach(button => {
+        button.disabled = false;
+        button.removeAttribute('aria-disabled');
+        delete button.dataset.loadingDisabledByOverlay;
+      });
+      document.body.classList.remove('loading-active');
+      workflowLoadingActive = false;
+    }
+    function disableMatchingWorkflowButtons(action) {
+      document.querySelectorAll('form').forEach(form => {
+        if ((form.getAttribute('action') || '') !== action) return;
+        form.querySelectorAll('button').forEach(button => {
+          if (!button.disabled) button.dataset.loadingDisabledByOverlay = 'true';
+          button.disabled = true;
+          button.setAttribute('aria-disabled', 'true');
+        });
+      });
+    }
+    document.addEventListener('submit', event => {
+      if (event.defaultPrevented) return;
+      const form = event.target;
+      if (!form || form.tagName !== 'FORM') return;
+      const method = (form.getAttribute('method') || 'get').toLowerCase();
+      if (method !== 'post') return;
+      const submitter = event.submitter || form.querySelector('button[type="submit"], button:not([type])');
+      const label = submitter ? submitter.textContent : '';
+      const message = form.dataset.loadingMessage || dashboardLoadingMessageForAction(form.getAttribute('action'), label);
+      if (!message) return;
+      if (workflowLoadingActive || form.dataset.loading === 'true') {
+        event.preventDefault();
+        return;
+      }
+      workflowLoadingActive = true;
+      form.dataset.loading = 'true';
+      form.setAttribute('aria-busy', 'true');
+      showWorkflowLoading(message);
+      window.requestAnimationFrame(() => disableMatchingWorkflowButtons(form.getAttribute('action') || ''));
+    });
+    document.addEventListener('click', event => {
+      const anchor = event.target && event.target.closest ? event.target.closest('a[data-loading-message]') : null;
+      if (!anchor || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      if (workflowLoadingActive) {
+        event.preventDefault();
+        return;
+      }
+      workflowLoadingActive = true;
+      showWorkflowLoading(anchor.dataset.loadingMessage);
+    });
+    window.addEventListener('pageshow', hideWorkflowLoading);
+"""
+
 def write_run_index(run_dirs: dict[str, Path], statuses: list[JobStatus], dashboard_path: Path | None = None) -> None:
     index_path = run_dirs["root"] / "index.html"
     dashboard_path = dashboard_path or (PROJECT_ROOT / "dashboard.html")
@@ -1881,6 +2007,7 @@ def write_run_index(run_dirs: dict[str, Path], statuses: list[JobStatus], dashbo
     .lightbox .prev { left: 1rem; }
     .lightbox .next { right: 1rem; }
     .lightbox .close { top: 1rem; right: 1rem; }
+""" + loading_overlay_css() + """
     @media (max-width: 980px) { .topbar { position: static; height: auto; flex-wrap: wrap; padding: .75rem; } .topbar .spacer { display: none; } .pill-links { flex: 1 1 100%; order: 3; } .layout { grid-template-columns: 1fr; padding-top: 0; } .sidebar { position: static; height: auto; } .summary, .cards, .plot-grid { grid-template-columns: 1fr; } }
   </style>
 </head>
@@ -1907,12 +2034,14 @@ def write_run_index(run_dirs: dict[str, Path], statuses: list[JobStatus], dashbo
     </main>
   </div>
   <div class="lightbox" id="lightbox"><button class="close" type="button">Close</button><button class="prev" type="button">&lt;</button><img alt=""><button class="next" type="button">&gt;</button></div>
+""" + loading_overlay_html() + """
   <script id="dashboard-data" type="application/json">""" + data_json + """</script>
   <script>
     const data = JSON.parse(document.getElementById('dashboard-data').textContent);
     let selected = 0;
     let plotSet = [];
     let plotIndex = 0;
+""" + loading_overlay_script() + """
     const cls = value => {
       if (!value) return 'idle';
       if (/^\\d+$/.test(String(value))) return 'ok';

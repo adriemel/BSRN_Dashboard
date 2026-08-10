@@ -43,6 +43,9 @@ from scripts.bsrn_download_check import (  # noqa: E402
     import_gate_status,
     is_routine_record_exclusion,
     json_for_html_script,
+    loading_overlay_css,
+    loading_overlay_html,
+    loading_overlay_script,
     load_config,
     load_curator_decisions,
     load_reference_id_cache,
@@ -598,6 +601,7 @@ def render_dashboard() -> str:
     .lightbox .prev {{ left: 1rem; }}
     .lightbox .next {{ right: 1rem; }}
     .lightbox .close {{ top: 1rem; right: 1rem; }}
+    {loading_overlay_css()}
     @media (max-width: 980px) {{
       .topbar {{ position: static; height: auto; flex-wrap: wrap; padding: .75rem; }}
       .topbar .spacer {{ display: none; }}
@@ -654,12 +658,14 @@ def render_dashboard() -> str:
     </main>
   </div>
   <div class="lightbox" id="lightbox"><button class="close" type="button">Close</button><button class="prev" type="button">&lt;</button><img alt=""><button class="next" type="button">&gt;</button></div>
+  {loading_overlay_html()}
   <script id="dashboard-data" type="application/json">{data_json}</script>
   <script>
     const data = JSON.parse(document.getElementById('dashboard-data').textContent);
     let selected = 0;
     let plotSet = [];
     let plotIndex = 0;
+    {loading_overlay_script()}
     const cls = value => {{
       if (!value) return 'idle';
       if (/^\\d+$/.test(String(value))) return 'ok';

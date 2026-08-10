@@ -1068,41 +1068,6 @@ def write_unsupported_records(path: Path, records: list[str], warnings: list[str
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def write_manifest(
-    path: Path,
-    status: JobStatus,
-    meta: StationJobMetadata,
-    detected_records: list[str],
-    warnings: list[str],
-    outputs: list[Path],
-    import_files: list[Path],
-) -> None:
-    manifest = {
-        "version": 1,
-        "generated_at": datetime.now().isoformat(timespec="seconds"),
-        "job": status.job,
-        "dat_path": status.dat_path,
-        "metadata_dir": status.metadata_dir,
-        "pangaea_reference_id": meta.pangaea_reference_id,
-        "station": {
-            "station_id": meta.station_id,
-            "event_label": meta.event_label,
-            "station_name": meta.station_name,
-            "source_id": meta.source_id,
-            "author_id": meta.author_id,
-            "author_name": meta.author_name,
-            "year": meta.year,
-            "month": meta.month,
-        },
-        "detected_data_records": [f"LR{record}" for record in detected_records],
-        "complete_data_converters_ported": True,
-        "ported_data_records": sorted(f"LR{record}" for record in SUPPORTED_RECORDS),
-        "generated_complete_import_files": [rel_path(output) for output in import_files],
-        "artifacts": [rel_path(output) for output in outputs],
-        "warnings": warnings,
-    }
-    path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-
 
 def generate_imports_for_status(status: JobStatus, import_root: Path, ids_dir: Path) -> tuple[list[Path], list[str]]:
     meta = load_station_job_metadata(status, ids_dir)
@@ -1113,22 +1078,20 @@ def generate_imports_for_status(status: JobStatus, import_root: Path, ids_dir: P
     if not records:
         warnings.append("No Tool 1 data logical records were detected for import generation.")
 
-    job_dir = import_root / status.job
-    job_dir.mkdir(parents=True, exist_ok=True)
-    unsupported_path = job_dir / output_name(meta, "unsupported_records")
-    manifest_path = job_dir / output_name(meta, "import_generation_manifest", ".json")
+    import_root.mkdir(parents=True, exist_ok=True)
+    unsupported_path = import_root / output_name(meta, "unsupported_records")
 
     optional = optional_rows(status, meta)
     import_files: list[Path] = []
     maybe_paths = [
-        generate_lr0100_0300(status, meta, blocks, job_dir, ids_dir),
-        generate_lr0500(meta, optional.get("LR0500", []), blocks, job_dir, ids_dir),
-        generate_lr1000(meta, optional.get("LR1000", []), job_dir),
-        generate_lr1100(meta, blocks, job_dir, ids_dir),
-        generate_lr1200(meta, optional.get("LR1200", []), blocks, job_dir),
-        generate_lr1300(meta, blocks, job_dir, ids_dir),
-        generate_lr3x30(meta, parse_lr3x30_rows(blocks, meta, "3010"), blocks, job_dir, ids_dir, 10),
-        generate_lr3x30(meta, parse_lr3x30_rows(blocks, meta, "3030"), blocks, job_dir, ids_dir, 30),
+        generate_lr0100_0300(status, meta, blocks, import_root, ids_dir),
+        generate_lr0500(meta, optional.get("LR0500", []), blocks, import_root, ids_dir),
+        generate_lr1000(meta, optional.get("LR1000", []), import_root),
+        generate_lr1100(meta, blocks, import_root, ids_dir),
+        generate_lr1200(meta, optional.get("LR1200", []), blocks, import_root),
+        generate_lr1300(meta, blocks, import_root, ids_dir),
+        generate_lr3x30(meta, parse_lr3x30_rows(blocks, meta, "3010"), blocks, import_root, ids_dir, 10),
+        generate_lr3x30(meta, parse_lr3x30_rows(blocks, meta, "3030"), blocks, import_root, ids_dir, 30),
     ]
     import_files.extend(path for path in maybe_paths if path is not None)
 
@@ -1139,9 +1102,7 @@ def generate_imports_for_status(status: JobStatus, import_root: Path, ids_dir: P
         warnings.append("LR0300 was detected but no combined LR0100+LR0300 import file was generated.")
 
     write_unsupported_records(unsupported_path, records, warnings)
-    outputs = [manifest_path, unsupported_path, *import_files]
-    write_manifest(manifest_path, status, meta, records, warnings, outputs, import_files)
-    return outputs, warnings
+    return [unsupported_path, *import_files], warnings
 
 
 def run_import_generation(args: argparse.Namespace) -> int:
@@ -1151,7 +1112,7 @@ def run_import_generation(args: argparse.Namespace) -> int:
 
     ids_dir = resolve_project_path(args.ids_dir or DEFAULT_IDS_DIR)
     run_root = status_path.parent
-    import_root = resolve_project_path(args.import_dir) if args.import_dir else run_root / "import_files"
+    import_root = resolve_project_path(args.import_dir) if args.import_dir else run_root / "importfiles"
     import_root.mkdir(parents=True, exist_ok=True)
 
     statuses = load_statuses(status_path)
@@ -1187,22 +1148,6 @@ def run_import_generation(args: argparse.Namespace) -> int:
             status.errors.append(f"Import generation error: {exc}")
             write_import_exception_log(import_root, status, exc)
 
-    summary_path = import_root / "import_generation_summary.json"
-    summary = {
-        "version": 1,
-        "generated_at": datetime.now().isoformat(timespec="seconds"),
-        "status_json": rel_path(status_path),
-        "attempted_rows": attempted,
-        "generated_rows": generated,
-        "selected_jobs": sorted(selected_jobs),
-        "missing_selected_jobs": missing_selected_jobs,
-        "blocked_rows": [
-            {"job": status.job, "warnings": status.import_warnings}
-            for status in statuses
-            if (not selected_jobs or status.job.upper() in selected_jobs) and not status.import_ok and status.import_warnings
-        ],
-    }
-    summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
 
     save_statuses(status_path, statuses)
     dashboard_path = resolve_project_path(args.dashboard or "dashboard.html")
@@ -1219,7 +1164,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--status", default=str(PROJECT_ROOT / "output" / "current" / "status.json"))
     parser.add_argument("--ids-dir", help="Directory containing BSRN_IDs.txt; defaults to tools/create-importfiles")
-    parser.add_argument("--import-dir", help="Output directory; defaults to <run>/import_files")
+    parser.add_argument("--import-dir", help="Output directory; defaults to <run>/importfiles")
     parser.add_argument("--dashboard", help="Central dashboard path; defaults to BSRN/dashboard.html")
     parser.add_argument("--job", action="append", help="Limit generation to one status row job label, e.g. BON_2025-01; repeatable")
     return parser

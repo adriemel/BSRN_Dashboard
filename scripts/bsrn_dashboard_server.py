@@ -156,7 +156,7 @@ def batch_artifacts(statuses: list[dict]) -> list[tuple[Path, str]]:
         reference = workflow_path(row.get("batch_reference_import_file"))
         if reference is not None and reference not in seen:
             seen.add(reference)
-            artifacts.append((reference, "Batch reference import"))
+            artifacts.append((reference, "Reference import"))
         report = workflow_path(row.get("batch_format_report"))
         if report is not None and report not in seen:
             seen.add(report)
@@ -330,8 +330,7 @@ def server_dashboard_row(row: dict) -> dict[str, object]:
     for value, label in (
         (row.get("dat_path"), "DAT file"),
         (row.get("metadata_dir"), "Metadata files"),
-        (row.get("reference_import_file"), "Reference import"),
-        (row.get("batch_reference_import_file"), "Batch reference import"),
+        (row.get("batch_reference_import_file") or row.get("reference_import_file"), "Reference import"),
         (row.get("batch_format_report") or row.get("format_report"), "Format report"),
     ):
         path = workflow_path(value)
@@ -342,7 +341,7 @@ def server_dashboard_row(row: dict) -> dict[str, object]:
         path = workflow_path(value)
         href = href_for(path) if path is not None else ""
         if href:
-            file_links.append({"href": href, "label": f"Batch LR{record}"})
+            file_links.append({"href": href, "label": f"Metadata LR{record}"})
 
     qc_links = []
     for path, label in qc_artifacts(row):
@@ -1041,12 +1040,7 @@ def render_row(row: dict) -> str:
         for item in [*reference_warning, *warnings, *errors, gate_detail_text, parent_comment]
         if item
     )
-    reference_links = link(workflow_path(row.get("reference_import_file")), "Reference import")
-    batch_reference_link = link(workflow_path(row.get("batch_reference_import_file")), "Batch")
-    if reference_links and batch_reference_link:
-        reference_links = reference_links + "<br>" + batch_reference_link
-    elif batch_reference_link:
-        reference_links = batch_reference_link
+    reference_links = link(workflow_path(row.get("batch_reference_import_file") or row.get("reference_import_file")), "Reference import")
     batch_format_link = link(workflow_path(row.get("batch_format_report")), "Batch format-check report")
     format_links = batch_format_link or link(workflow_path(row.get("format_report")))
     return (

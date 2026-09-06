@@ -377,7 +377,7 @@ def parse_reference_id_row(row: list[str]) -> tuple[str, int] | None:
     return None
 
 
-def reference_uri_from_import_file(path: Path) -> str:
+def reference_uri_from_import_file(path: Path, job_label: str | None = None) -> str:
     rows = read_tsv(path)
     if len(rows) < 2:
         raise WorkflowError(f"Cannot resolve PANGAEA reference ID: {path.name} has no reference row")
@@ -385,6 +385,14 @@ def reference_uri_from_import_file(path: Path) -> str:
     if "URI" not in header:
         raise WorkflowError(f"Cannot resolve PANGAEA reference ID: {path.name} has no URI column")
     uri_idx = header.index("URI")
+    if job_label is not None and (path.name == "reference_import.txt" or len(rows) > 2):
+        year, month = parse_status_year_month(job_label)
+        filename = Job(job_label.split("_", 1)[0], year, month).gz_name
+        for row in rows[1:]:
+            uri = row[uri_idx].strip() if len(row) > uri_idx else ""
+            if uri.rsplit("/", 1)[-1] == filename:
+                return uri
+        raise WorkflowError(f"Cannot resolve PANGAEA reference ID: {path.name} has no row for {job_label}")
     uri = rows[1][uri_idx].strip() if len(rows[1]) > uri_idx else ""
     if not uri:
         raise WorkflowError(f"Cannot resolve PANGAEA reference ID: {path.name} has a blank URI")
@@ -394,7 +402,7 @@ def reference_uri_from_import_file(path: Path) -> str:
 def attach_reference_id_status(status: JobStatus, reference_lookup: dict[str, int], cache_warning: str | None) -> None:
     if not status.reference_import_file:
         return
-    uri = reference_uri_from_import_file(workflow_path(status.reference_import_file))
+    uri = reference_uri_from_import_file(workflow_path(status.reference_import_file), status.job)
     status.pangaea_reference_uri = uri
     reference_id = reference_lookup.get(uri)
     if reference_id is not None:
@@ -978,7 +986,7 @@ def write_batch_reference_import(statuses: list[JobStatus], metadata_dir: Path) 
 
     if header is None or not rows:
         return None
-    output_path = metadata_dir / "reference_import_batch.txt"
+    output_path = metadata_dir / "reference_import.txt"
     write_tsv(output_path, [header, *rows])
     return output_path
 
@@ -1047,7 +1055,7 @@ def write_batch_metadata_reports(statuses: list[JobStatus], metadata_dir: Path) 
 
         if header is None:
             continue
-        output_path = metadata_dir / f"metadata_batch_{record}.txt"
+        output_path = metadata_dir / f"metadata_{record}.txt"
         write_tsv(output_path, [header, *rows])
         reports[record] = output_path
     return reports
@@ -1066,6 +1074,29 @@ def attach_batch_artifacts(
         status.batch_reference_import_file = reference_text
         status.batch_format_report = format_text
         status.batch_metadata_reports = metadata_text
+
+
+def remove_individual_metadata_files(
+    statuses: list[JobStatus], metadata_dir: Path,
+    reports: dict[str, Path], reference_import: Path | None,
+) -> None:
+    """Remove generated inputs only after their consolidated outputs exist.
+
+    Restrict deletion to known station-month filenames directly in this run's
+    metadata directory. Retain sources if their consolidated output is missing.
+    """
+    root = metadata_dir.resolve()
+    for status in statuses:
+        if status.metadata_dir and workflow_path(status.metadata_dir).resolve() == root:
+            for record, report in reports.items():
+                source = root / f"{status.job}_{record}.txt"
+                if source.resolve().parent == root and report.is_file():
+                    source.unlink(missing_ok=True)
+        if status.reference_import_file and reference_import is not None and reference_import.is_file():
+            source = workflow_path(status.reference_import_file)
+            if source.resolve().parent == root and source.name == f"{status.job}_refImp.txt":
+                source.unlink(missing_ok=True)
+                status.reference_import_file = str(reference_import)
 
 
 def attach_minute_completeness(status: JobStatus) -> None:
@@ -2294,14 +2325,13 @@ def static_dashboard_row(base_path: Path, status: JobStatus, curator_decisions: 
     for value, label in (
         (status.dat_path, "DAT file"),
         (status.metadata_dir, "Metadata files"),
-        (status.reference_import_file, "Reference import"),
-        (status.batch_reference_import_file, "Batch reference import"),
+        (status.batch_reference_import_file or status.reference_import_file, "Reference import"),
         (status.batch_format_report or status.format_report, "Format report"),
     ):
         if value:
             file_links.append({"href": rel_href(base_path, workflow_path(value)), "label": label})
     for record, value in sorted((status.batch_metadata_reports or {}).items()):
-        file_links.append({"href": rel_href(base_path, workflow_path(value)), "label": f"Batch LR{record}"})
+        file_links.append({"href": rel_href(base_path, workflow_path(value)), "label": f"Metadata LR{record}"})
 
     minute_status, minute_detail = dashboard_minute_completeness(status.minute_completeness)
 
@@ -2728,6 +2758,7 @@ def run_workflow(args: argparse.Namespace) -> int:
     batch_metadata_reports = write_batch_metadata_reports(statuses, run_dirs["metadata"])
     batch_format_report = write_batch_format_report(statuses, run_dirs["format_reports"])
     attach_batch_artifacts(statuses, batch_reference_import, batch_format_report, batch_metadata_reports)
+    remove_individual_metadata_files(statuses, run_dirs["metadata"], batch_metadata_reports, batch_reference_import)
 
     status_json = run_dirs["root"] / "status.json"
     status_json.write_text(json.dumps([asdict(status) for status in statuses], indent=2), encoding="utf-8")

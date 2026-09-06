@@ -48,6 +48,10 @@ output\current
 ```
 
 The dashboard links metadata reports, format-check reports, QC HTML reports, QC plots, readable data exports, and generated import folders when available. QC continuation creates the interactive HTML QC report by default; the slower static report is optional with `--include-static-qc-report`.
+The metadata folder retains consolidated `metadata_0001.txt` through
+`metadata_0009.txt` and `reference_import.txt`, even for a single station-month.
+Individual metadata files are used during checks and removed after consolidation
+succeeds. The metadata tables retain the Job and Source file columns.
 After download/check has produced a DAT file, use `Export all data` or a row's `Export data` action to write user-facing CSVs to the run's `data_exports` folder. QC continuation also refreshes these exports.
 
 Readable data exports are separate from PANGAEA import artifacts. They are written as per-logical-record CSVs such as `CAB_2025-04_LR0100_radiation.csv`, use readable parameter names where possible, and include a `Date/Time` column for time-based records. LR4000 remains excluded.

@@ -171,6 +171,20 @@ def read_generated_metadata_outputs(metadata_dir: Path, event_label: str, year: 
         if path.stem.rsplit("_", 1)[-1] in METADATA_RECORDS
     )
     if not generated:
+        # Consolidated tables retain a Job column so another station-month's
+        # metadata cannot accidentally satisfy this prerequisite.
+        found_job = False
+        for record in sorted(METADATA_RECORDS):
+            path = metadata_dir / f"metadata_{record}.txt"
+            if not path.is_file():
+                continue
+            table = read_tsv(path)
+            if table and "Job" in table[0]:
+                job_index = table[0].index("Job")
+                found_job |= any(len(row) > job_index and row[job_index] == prefix[:-1] for row in table[1:])
+        if found_job:
+            return
+    if not generated:
         raise ImportWorkflowError(f"Generated metadata outputs were not found for {event_label}_{year:04d}-{month:02d}.")
     for path in generated:
         read_tsv(path)

@@ -65,3 +65,24 @@ requirements.txt
 ```
 
 On the current setup, the bundled Python runtime is used by the launcher and documented commands.
+
+## Performance
+
+Downloads prefetch two files at a time while metadata and format checks remain
+sequential. Set `download_workers = 1` in the `[ftp]` section of your local config
+for serial transfers; values from 1 to 4 are supported. The command-line
+`--download-workers` option overrides this setting. FTP failures remain attached
+to the individual job, and the existing FTP/FTPS transport is retained.
+
+QC parses each monthly DAT once and gives independent copies to its report
+generators. QC calculations, thresholds, plot resolution and exported values are
+unchanged. Static QC reports remain optional.
+
+Readable CSV exports are reused when the DAT content, export/parser source code,
+and every generated CSV still match their saved hashes. Changing or deleting a
+CSV, modifying the DAT, or updating parser code triggers regeneration. Cache
+manifests live under the run's `data_exports/.cache` folder. This also avoids
+repeating an earlier `Export data` operation when continuing to QC.
+
+For an existing local DAT, use the local-file input to avoid another FTP transfer.
+Remote jobs still download fresh files so upstream corrections are picked up.

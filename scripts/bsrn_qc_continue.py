@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import csv
 import contextlib
+import copy
 import datetime as dt
 import io
 import os
@@ -100,6 +101,17 @@ def run_qc_for_dat(dat_path: Path, qc_root: Path, include_static_report: bool = 
     warnings: list[str] = []
     outputs: list[Path] = []
     report_path: Path | None = None
+    parsed = None
+
+    def parsed_copy():
+        # Scope reuse to this file/run. Each consumer gets independent mutable
+        # data, exactly as when it parsed the file itself.
+        nonlocal parsed
+        import bsrn_qc
+        if parsed is None:
+            parsed = bsrn_qc.parse_dat_file(dat_path)
+        df, metadata = parsed
+        return df.copy(deep=True), copy.deepcopy(metadata)
 
     if include_static_report:
         try:
@@ -108,7 +120,7 @@ def run_qc_for_dat(dat_path: Path, qc_root: Path, include_static_report: bool = 
             raise QcWorkflowError(f"Could not import tools/qc-graphs/bsrn_qc.py: {exc}") from exc
 
         with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
-            info = bsrn_qc.process_one_file(dat_path, qc_root)
+            info = bsrn_qc.process_one_file(dat_path, qc_root, parsed_data=parsed_copy())
 
         log_text = output.getvalue()
         if log_text:
@@ -124,7 +136,7 @@ def run_qc_for_dat(dat_path: Path, qc_root: Path, include_static_report: bool = 
         outputs.append(report_path)
 
     try:
-        interactive_path = generate_interactive_report(dat_path, qc_root)
+        interactive_path = generate_interactive_report(dat_path, qc_root, parsed_data=parsed_copy())
         outputs.append(interactive_path)
         if report_path is None:
             report_path = interactive_path
@@ -134,12 +146,12 @@ def run_qc_for_dat(dat_path: Path, qc_root: Path, include_static_report: bool = 
         warnings.append(f"QC warning: interactive report skipped for {dat_path.name}: {exc}")
 
     try:
-        outputs.extend(generate_swd_sumsw_plots(dat_path, qc_root))
+        outputs.extend(generate_swd_sumsw_plots(dat_path, qc_root, parsed_data=parsed_copy()))
     except Exception as exc:
         warnings.append(f"QC warning: SWD/SumSW time-of-day plots skipped for {dat_path.name}: {exc}")
 
     try:
-        outputs.extend(generate_logical_record_artifacts(dat_path, qc_root))
+        outputs.extend(generate_logical_record_artifacts(dat_path, qc_root, metadata=parsed_copy()[1]))
     except Exception as exc:
         warnings.append(f"QC warning: optional logical-record extraction skipped for {dat_path.name}: {exc}")
 
@@ -148,11 +160,11 @@ def run_qc_for_dat(dat_path: Path, qc_root: Path, include_static_report: bool = 
     return report_path, outputs, warnings
 
 
-def generate_interactive_report(dat_path: Path, qc_root: Path) -> Path:
+def generate_interactive_report(dat_path: Path, qc_root: Path, *, parsed_data=None) -> Path:
     import bsrn_qc
     from interactive_report import generate_interactive_report as write_interactive_report
 
-    df, metadata = bsrn_qc.parse_dat_file(dat_path)
+    df, metadata = bsrn_qc.parse_dat_file(dat_path) if parsed_data is None else parsed_data
     df = bsrn_qc.compute_solar_auxiliary(df, metadata["latitude"], metadata["longitude"])
     lr4000_report = bsrn_qc.check_lr4000(df, metadata)
     df = bsrn_qc.run_qc_checks(df)
@@ -164,18 +176,18 @@ def generate_interactive_report(dat_path: Path, qc_root: Path) -> Path:
     return report_path
 
 
-def generate_swd_sumsw_plots(dat_path: Path, qc_root: Path) -> list[Path]:
+def generate_swd_sumsw_plots(dat_path: Path, qc_root: Path, *, parsed_data=None) -> list[Path]:
     from bsrn_swd_sumsw_time_of_day import create_plots
 
     output_dir = qc_root / f"{dat_path.stem}_SWD_SumSW_time_of_day"
-    summary = create_plots(dat_path, output_dir=output_dir)
+    summary = create_plots(dat_path, output_dir=output_dir, parsed_data=parsed_data)
     return [
         Path(summary["daily_panel_grid"]),
         Path(summary["all_days_overlay"]),
     ]
 
 
-def generate_logical_record_artifacts(dat_path: Path, qc_root: Path) -> list[Path]:
+def generate_logical_record_artifacts(dat_path: Path, qc_root: Path, *, metadata=None) -> list[Path]:
     mpl_config_dir = qc_root / "_matplotlib"
     mpl_config_dir.mkdir(parents=True, exist_ok=True)
     os.environ.setdefault("MPLCONFIGDIR", str(mpl_config_dir))
@@ -183,7 +195,8 @@ def generate_logical_record_artifacts(dat_path: Path, qc_root: Path) -> list[Pat
     import bsrn_qc
     import matplotlib.pyplot as plt
 
-    _, metadata = bsrn_qc.parse_dat_file(dat_path)
+    if metadata is None:
+        _, metadata = bsrn_qc.parse_dat_file(dat_path)
     records = extract_optional_logical_records(
         dat_path,
         int(metadata["year"]),

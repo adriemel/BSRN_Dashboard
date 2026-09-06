@@ -5,6 +5,9 @@ remote_root = /
 user = anonymous
 password = anonymous@
 timeout_seconds = 60
+# Prefetch up to two files while checks run sequentially. Use 1 for serial
+# downloads, or up to 4 if the FTP server and network allow it.
+download_workers = 2
 
 # BSRN_FTP_USER and BSRN_FTP_PASSWORD environment variables override
 # user/password when set. Keep real credentials in ignored local config

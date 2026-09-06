@@ -1772,7 +1772,7 @@ def _launch_dashboard():
     return None
 
 
-def process_one_file(filepath, output_dir):
+def process_one_file(filepath, output_dir, *, parsed_data=None):
     """Full pipeline for one .dat file. Returns metadata dict with results."""
     filepath = Path(filepath)
     print(f"\n{'='*60}")
@@ -1781,7 +1781,7 @@ def process_one_file(filepath, output_dir):
 
     # 1. Parse
     print("  [1/5] Parsing .dat file...")
-    df, metadata = parse_dat_file(filepath)
+    df, metadata = parse_dat_file(filepath) if parsed_data is None else parsed_data
     print(f"        {metadata['station_name']} ({metadata['station_code']}), "
           f"{metadata['year']}-{metadata['month']:02d}, "
           f"{len(df)} records, "

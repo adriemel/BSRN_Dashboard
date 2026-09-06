@@ -358,6 +358,7 @@ def create_plots(
     y_max: float | None = None,
     gap_minutes: int = DEFAULT_GAP_MINUTES,
     dpi: int = 180,
+    parsed_data=None,
 ) -> dict[str, object]:
     """
     Parse one monthly BSRN .dat file and create:
@@ -373,7 +374,7 @@ def create_plots(
     if not dat_file.exists():
         raise FileNotFoundError(f"Input .dat file not found: {dat_file}")
 
-    df, metadata = parse_dat_file(dat_file)
+    df, metadata = parse_dat_file(dat_file) if parsed_data is None else parsed_data
     df = compute_solar_auxiliary(
         df,
         metadata["latitude"],

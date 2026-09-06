@@ -27,6 +27,7 @@ import traceback
 import types
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -544,6 +545,41 @@ def download_job(job: Job, cfg: configparser.ConfigParser, download_dir: Path) -
         with local_path.open("wb") as handle:
             ftp.retrbinary(f"RETR {remote_path}", handle.write)
     return local_path
+
+
+def download_jobs(jobs: list[Job], cfg: configparser.ConfigParser, download_dir: Path, workers: int = 2):
+    """Prefetch a bounded number of files; yield results/errors in input order.
+
+    Only network transfers run in workers. Checks, shared metadata files and
+    status updates remain sequential. Duplicate destinations are downloaded once.
+    """
+    if not 1 <= workers <= 4:
+        raise WorkflowError("Download workers must be between 1 and 4")
+    jobs = list(dict.fromkeys(jobs))
+    if workers == 1:
+        for job in jobs:
+            try:
+                path = download_job(job, cfg, download_dir)
+            except Exception as exc:
+                yield job, None, exc
+            else:
+                yield job, path, None
+        return
+    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="bsrn-download") as pool:
+        pending = {}
+        for index, job in enumerate(jobs):
+            if index == 0:
+                for upcoming in jobs[:workers]:
+                    pending[upcoming] = pool.submit(download_job, upcoming, cfg, download_dir)
+            future = pending.pop(job)
+            try:
+                path, error = future.result(), None
+            except Exception as exc:
+                path, error = None, exc
+            if index + workers < len(jobs):
+                upcoming = jobs[index + workers]
+                pending[upcoming] = pool.submit(download_job, upcoming, cfg, download_dir)
+            yield job, path, error
 
 
 def decompress_gzip(gz_path: Path, dat_dir: Path) -> Path:
@@ -1741,13 +1777,14 @@ def loading_overlay_css() -> str:
     .loading-overlay.open { display: grid; }
     body.loading-active { overflow: hidden; }
     body.loading-active .topbar, body.loading-active .layout { filter: blur(1px); }
-    .loading-panel { display: grid; justify-items: center; gap: .85rem; width: min(22rem, 92vw); padding: 1.35rem 1.5rem; border: 1px solid rgba(172,196,212,.92); border-radius: 8px; background: rgba(255,255,255,.88); box-shadow: 0 18px 42px rgba(18,52,60,.18); text-align: center; }
-    .loading-sun { width: clamp(5rem, 18vw, 7.5rem); height: auto; overflow: visible; }
-    .loading-sun .sun-rays { transform-origin: 60px 60px; animation: bsrn-rays-spin 8s linear infinite; }
-    .loading-sun .sun-core { transform-origin: 60px 60px; animation: bsrn-sun-breathe 2.8s ease-in-out infinite; }
-    .loading-status { color: var(--text); font-size: 15px; font-weight: 800; }
+    .loading-panel { box-sizing: border-box; display: grid; justify-items: center; gap: .8rem; width: min(24rem, 100%); padding: 2rem 1.5rem; border: 1px solid rgba(172,196,212,.65); border-radius: 20px; background: linear-gradient(160deg, #fff, #f6faf9); box-shadow: 0 24px 64px rgba(18,52,60,.14), 0 2px 8px rgba(18,52,60,.04); text-align: center; }
+    .loading-sun { width: clamp(5rem, 18vw, 6.5rem); height: auto; overflow: visible; margin-bottom: .3rem; }
+    .loading-sun .sun-rays { transform-origin: 60px 60px; animation: bsrn-rays-spin 24s linear infinite; }
+    .loading-sun .sun-core { transform-origin: 60px 60px; animation: bsrn-sun-breathe 4s ease-in-out infinite; }
+    .loading-status { color: var(--text); font-size: 15px; font-weight: 600; line-height: 1.5; }
+    .loading-note { margin: 0; max-width: 28ch; color: #526971; font-size: 13px; line-height: 1.6; }
     @keyframes bsrn-rays-spin { to { transform: rotate(360deg); } }
-    @keyframes bsrn-sun-breathe { 0%, 100% { transform: scale(.96); opacity: .9; } 50% { transform: scale(1.04); opacity: 1; } }
+    @keyframes bsrn-sun-breathe { 0%, 100% { transform: scale(.98); opacity: .92; } 50% { transform: scale(1.02); opacity: 1; } }
     @media (prefers-reduced-motion: reduce) {
       .loading-sun .sun-rays, .loading-sun .sun-core { animation: none; }
       .loading-overlay { backdrop-filter: none; }
@@ -1760,7 +1797,20 @@ def loading_overlay_html() -> str:
   <div class="loading-overlay" id="workflowLoadingOverlay" aria-hidden="true">
     <div class="loading-panel" role="status" aria-live="polite" aria-atomic="true">
       <svg class="loading-sun" viewBox="0 0 120 120" aria-hidden="true" focusable="false">
-        <g class="sun-rays" fill="none" stroke="#ffbd3d" stroke-width="5" stroke-linecap="round">
+        <defs>
+          <radialGradient id="workflowSunHalo">
+            <stop offset="0%" stop-color="#f5bd55" stop-opacity=".22"></stop>
+            <stop offset="100%" stop-color="#f5bd55" stop-opacity="0"></stop>
+          </radialGradient>
+          <linearGradient id="workflowSunGold" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="#ffe2a0"></stop>
+            <stop offset="55%" stop-color="#f5bd55"></stop>
+            <stop offset="100%" stop-color="#dc922b"></stop>
+          </linearGradient>
+        </defs>
+        <circle cx="60" cy="60" r="58" fill="url(#workflowSunHalo)"></circle>
+        <circle cx="60" cy="60" r="56" fill="none" stroke="#dce8e6" stroke-width=".75"></circle>
+        <g class="sun-rays" fill="none" stroke="#dda343" stroke-width="2.5" stroke-linecap="round">
           <line x1="60" y1="10" x2="60" y2="24"></line>
           <line x1="60" y1="96" x2="60" y2="110"></line>
           <line x1="10" y1="60" x2="24" y2="60"></line>
@@ -1770,10 +1820,11 @@ def loading_overlay_html() -> str:
           <line x1="24.6" y1="95.4" x2="34.5" y2="85.5"></line>
           <line x1="85.5" y1="34.5" x2="95.4" y2="24.6"></line>
         </g>
-        <circle cx="60" cy="60" r="27" fill="#ffbd3d" opacity=".22"></circle>
-        <circle class="sun-core" cx="60" cy="60" r="22" fill="#ffbd3d" stroke="#d69a20" stroke-width="2"></circle>
+        <circle cx="60" cy="60" r="28" fill="none" stroke="#ebc883" stroke-width=".75"></circle>
+        <circle class="sun-core" cx="60" cy="60" r="22" fill="url(#workflowSunGold)"></circle>
       </svg>
       <div class="loading-status" id="workflowLoadingMessage">Processing...</div>
+      <p class="loading-note">Please keep this window open.<br>Your results will appear when ready.</p>
     </div>
   </div>
 """
@@ -2565,6 +2616,11 @@ def rel_link_with_label(from_file: Path, target: Path, label: str) -> str:
 
 def run_workflow(args: argparse.Namespace) -> int:
     cfg = load_config(resolve_project_path(args.config))
+    download_workers = getattr(args, "download_workers", None)
+    if download_workers is None:
+        download_workers = cfg.getint("ftp", "download_workers", fallback=2)
+    if not 1 <= download_workers <= 4:
+        raise WorkflowError("Download workers must be between 1 and 4")
     output_root = resolve_project_path(args.output_root or cfg.get("paths", "output_root", fallback="output"))
     ids_dir = resolve_project_path(args.ids_dir or cfg.get("paths", "ids_dir", fallback=str(DEFAULT_IDS_DIR)))
     if args.refresh_bsrn_ids:
@@ -2630,11 +2686,14 @@ def run_workflow(args: argparse.Namespace) -> int:
             status.errors.append(str(exc))
             write_exception_log(run_dirs["logs"], f"{status.job}_download_check", exc)
 
-    for job in expand_jobs(args):
+    for job, gz_path, download_error in download_jobs(
+        expand_jobs(args), cfg, run_dirs["downloads_gz"], download_workers
+    ):
         status = JobStatus(job=job.label, source=f"ftp:{job.gz_name}")
         statuses.append(status)
         try:
-            gz_path = download_job(job, cfg, run_dirs["downloads_gz"])
+            if download_error is not None:
+                raise download_error
             status.downloaded = True
             status.gz_path = str(gz_path)
             dat_path = decompress_gzip(gz_path, run_dirs["dat"])
@@ -2691,6 +2750,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--refresh-bsrn-ids", action="store_true", help="Download a fresh BSRN_IDs.txt before checks")
     parser.add_argument("--refresh-reference-ids", action="store_true", help=f"Download a fresh {BSRN_REFERENCE_IDS_FILE} before checks")
     parser.add_argument("--job", action="append", help="BSRN job code, e.g. cab0425 or cab0425.dat.gz")
+    parser.add_argument("--download-workers", type=int, choices=range(1, 5), help="Concurrent downloads (1-4); defaults to ftp.download_workers or 2. Checks remain sequential.")
     parser.add_argument("--jobs-file", help="Text file with one BSRN job code per line")
     parser.add_argument("--station", action="append", help="Station acronym; repeatable")
     parser.add_argument("--year", action="append", type=int, help="Four-digit year; repeatable")

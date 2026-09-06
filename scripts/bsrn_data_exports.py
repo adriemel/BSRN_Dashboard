@@ -5,7 +5,11 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
+import json
+import os
 import sys
+import tempfile
 from pathlib import Path
 from typing import Iterable
 
@@ -184,7 +188,77 @@ def write_record_export(
     return path
 
 
+def _file_digest(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _export_cache_key(status: JobStatus, dat_path: Path) -> str:
+    # Include parser sources so updating the workflow invalidates old exports.
+    sources = (
+        "bsrn_data_exports.py", "bsrn_download_check.py",
+        "bsrn_import_files.py", "bsrn_qc_continue.py", "bsrn_station_registry.py",
+    )
+    parts = ["1", sys.version, status.job, str(dat_path.resolve()), _file_digest(dat_path)]
+    parts.extend(_file_digest(PROJECT_ROOT / "scripts" / name) for name in sources)
+    return hashlib.sha256(json.dumps(parts).encode("utf-8")).hexdigest()
+
+
 def generate_data_exports_for_status(status: JobStatus, run_root: Path) -> tuple[list[Path], list[str]]:
+    """Reuse exports only when input, parser sources and every CSV still match."""
+    if not status.dat_path or not workflow_path(status.dat_path).is_file():
+        return _generate_data_exports_for_status(status, run_root)
+    dat_path = workflow_path(status.dat_path)
+    export_dir = run_root / "data_exports"
+    identity = hashlib.sha256((status.job + str(dat_path.resolve())).encode("utf-8")).hexdigest()
+    manifest = export_dir / ".cache" / f"{identity}.json"
+    key = None
+    try:
+        key = _export_cache_key(status, dat_path)
+        cached = json.loads(manifest.read_text(encoding="utf-8"))
+        if cached["key"] == key and cached["outputs"]:
+            outputs = []
+            for item in cached["outputs"]:
+                path = export_dir / item["name"]
+                if path.resolve().parent != export_dir.resolve() or path.suffix != ".csv":
+                    raise ValueError("Invalid cached export path")
+                if _file_digest(path) != item["sha256"]:
+                    raise ValueError("Export has changed")
+                outputs.append(path)
+            warnings = cached["warnings"]
+            if not isinstance(warnings, list) or not all(isinstance(warning, str) for warning in warnings):
+                raise ValueError("Invalid cached warnings")
+            return outputs, warnings
+    except (OSError, ValueError, KeyError, TypeError):
+        pass  # A missing, damaged or outdated cache is always safe to regenerate.
+
+    outputs, warnings = _generate_data_exports_for_status(status, run_root)
+    temporary = None
+    try:
+        if key is not None and outputs and _export_cache_key(status, dat_path) == key:
+            payload = {"key": key, "warnings": warnings, "outputs": [
+                {"name": path.name, "sha256": _file_digest(path)} for path in outputs
+            ]}
+            manifest.parent.mkdir(parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=manifest.parent, delete=False) as handle:
+                temporary = Path(handle.name)
+                json.dump(payload, handle)
+            os.replace(temporary, manifest)
+    except OSError:
+        pass  # Caching is optional; successful CSV generation must still succeed.
+    finally:
+        if temporary is not None:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+    return outputs, warnings
+
+
+def _generate_data_exports_for_status(status: JobStatus, run_root: Path) -> tuple[list[Path], list[str]]:
     """Generate separate readable CSVs for supported data logical records."""
 
     if not status.dat_path:

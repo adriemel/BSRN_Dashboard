@@ -25,7 +25,7 @@ cab0325
 cab0425
 ```
 
-FTP download requires a local `config/bsrn_workflow.ini` file with valid BSRN FTP login details. This file is intentionally ignored by Git. Curators can obtain the login details from Amelie Driemel, `amelie.driemel@awi.de`.
+FTP download requires a local `config/bsrn_workflow.ini` file with valid BSRN FTP login details. This file is intentionally ignored by Git. Users can obtain the login details from Amelie Driemel, `amelie.driemel@awi.de`.
 
 ## Run Local DAT Files
 

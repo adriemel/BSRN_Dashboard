@@ -531,6 +531,7 @@ def render_dashboard() -> str:
     .job-button {{ width: 100%; justify-content: flex-start; text-align: left; border: 1px solid var(--line); border-left: 3px solid transparent; border-radius: 6px; padding: .58rem .6rem; background: #fff; color: var(--text); }}
     .job-button.active {{ border-left-color: var(--blue); background: var(--active); }}
     .job-name {{ display: block; font-weight: 700; margin-bottom: .35rem; }}
+    .job-approval {{ display: block; margin-top: .3rem; color: #246b48; font-size: 11px; font-weight: 700; }}
     .dots {{ display: flex; gap: .25rem; }}
     .dot {{ width: 9px; height: 9px; border-radius: 999px; background: var(--gray); }}
     .main {{ padding: 1.1rem 1.4rem 2rem; overflow: auto; }}
@@ -662,6 +663,12 @@ def render_dashboard() -> str:
   <script>
     const data = JSON.parse(document.getElementById('dashboard-data').textContent);
     let selected = 0;
+    // Keep navigation state in this tab across action redirects and refreshes.
+    const selectionKey = 'bsrn-dashboard-selected-job';
+    try {{
+      const savedJob = sessionStorage.getItem(selectionKey);
+      selected = Math.max(0, data.rows.findIndex(row => row.job === savedJob));
+    }} catch (_) {{ /* Storage may be disabled; keep the first-row fallback. */ }}
     let plotSet = [];
     let plotIndex = 0;
     {loading_overlay_script()}
@@ -723,8 +730,15 @@ def render_dashboard() -> str:
         const dots = el('span', {{class: 'dots'}});
         [row.metadata, row.format, row.qc].forEach(value => dots.appendChild(el('span', {{class: 'dot ' + cls(value), title: value}})));
         content.appendChild(dots);
+        if (['QC approved', 'Import files generated'].includes(row.gate_label)) {{
+          content.appendChild(el('span', {{class: 'job-approval', title: 'QC approved'}}, '\u2713 Approved'));
+        }}
         button.appendChild(content);
-        button.addEventListener('click', () => {{ selected = index; renderList(); renderDetail(); }});
+        button.addEventListener('click', () => {{
+          selected = index;
+          try {{ sessionStorage.setItem(selectionKey, row.job); }} catch (_) {{}}
+          renderList(); renderDetail();
+        }});
         list.appendChild(button);
       }});
     }}
@@ -893,6 +907,7 @@ def render_dashboard() -> str:
       if (panel) panel.open = true;
     }}));
     renderSummary(); renderList(); renderDetail();
+    document.querySelector('.job-button.active')?.scrollIntoView({{block: 'nearest'}});
   </script>
 </body>
 </html>

@@ -211,6 +211,7 @@ Angelo Lupi	61125
 Dazhi Yang	86298
 Epp Andresson	111086
 Jonas Witthuhn	60686
+Dr Alexander Geddes	119242
 [Expanded]			
 Method text			
 Cloud base height is measured using the cloud ceilometer LD-WHX 137.1819.00/002	6122		
@@ -2240,6 +2241,7 @@ Station ID, Serial No., WRMC No.	PANGAEA Method ID
 60, SN 924693, WRMC No. 60012	8597
 60, SN 120919, WRMC No. 60013	8882
 60, SN 100261, WRMC No. 60014	8883
+60, SN 160399, WRMC No. 60019	19788
 61, SN 080034, WRMC No. 61001	6408
 61, SN 080032, WRMC No. 61002	6409
 61, SN 080050, WRMC No. 61003	6410

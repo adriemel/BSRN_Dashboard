@@ -25,6 +25,9 @@ input/*.dat
 *.exe
 tools/format-check/bin/
 
+# Windows folder icon settings (local only).
+desktop.ini
+
 # Curator specific information
 /human-workflow.md
 /plan-milestones.md

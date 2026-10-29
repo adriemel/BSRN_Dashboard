@@ -90,3 +90,9 @@ repeating an earlier `Export data` operation when continuing to QC.
 
 For an existing local DAT, use the local-file input to avoid another FTP transfer.
 Remote jobs still download fresh files so upstream corrections are picked up.
+
+## Desktop Icon
+
+`assets/icons/BSRN-Curator-Dashboard.ico` (16–256 px) can be used for a desktop shortcut or the repository folder on Windows. Shortcut: right-click **Start-BSRN-Workflow.cmd** → **Send to → Desktop (create shortcut)**, then on the shortcut **Properties → Change Icon… → Browse**. Folder: **Properties → Customize → Change Icon…**; Windows stores this in a local `desktop.ini`, which Git ignores. The icon is generated in the BSRN User Dashboard repository with `python assets/icons/make_icons.py curator`.
+
+The BSRN logo and the icons derived from it (`assets/icons/*.ico`) are excluded from the GPL-3.0 licence. They identify the Baseline Surface Radiation Network (WRMC, hosted at AWI) and may not be used for other purposes without permission.

@@ -1976,6 +1976,7 @@ DASHBOARD_CSS = r"""
     .link-list a { display: block; padding: 11px 14px; font-size: 14px; }
     .link-list a:hover { background: var(--accent-soft); }
     .placeholder { padding: 32px; border: 1px dashed #C9CDD2; border-radius: 8px; color: var(--muted); text-align: center; background: var(--card); }
+    .report-bar { margin-bottom: 16px; }
     .plot-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
     .plot-card { display: block; min-height: 0; padding: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: #fff; text-align: left; color: var(--text); font-weight: 400; }
     .plot-card:hover { border-color: var(--accent); background: #fff; }
@@ -2169,6 +2170,14 @@ DASHBOARD_SCRIPT = r"""
       });
       return wrap;
     }
+    // QC reports (HTML), interactive report first: it is the main curator review view.
+    function qcReports(row) {
+      const reports = row.qc_artifacts.filter(item => item.kind !== 'plot');
+      return reports.filter(item => item.label === 'Interactive QC report').concat(reports.filter(item => item.label !== 'Interactive QC report'));
+    }
+    function reportLink(item, css) {
+      return el('a', {class: css, href: item.href, target: '_blank', rel: 'noopener'}, 'Open ' + item.label + ' \u2197');
+    }
     function actionCard(row) {
       const node = el('section', {class: 'card next-step', 'aria-label': 'Next step'});
       const text = el('div', {class: 'next-text'});
@@ -2179,6 +2188,7 @@ DASHBOARD_SCRIPT = r"""
       if (isStatic && ['curator', 'ready'].includes(row.action_kind)) {
         title = row.action_kind === 'ready' ? 'Generate import files' : 'Review QC and decide';
         detail = row.action_kind === 'ready' ? 'Generate import files from the local dashboard server.' : 'Check the QC plots, then approve or reject in the local dashboard server.';
+        if (row.action_kind === 'curator' && qcReports(row).length) actions.appendChild(reportLink(qcReports(row)[0], 'button'));
         actions.appendChild(el('a', {class: 'button primary', href: data.serverUrl}, 'Open local dashboard'));
       } else if (row.action_kind === 'continue') {
         title = 'Run QC';
@@ -2188,6 +2198,7 @@ DASHBOARD_SCRIPT = r"""
       } else if (row.action_kind === 'curator') {
         title = row.gate_label === 'Awaiting curator approval' ? 'Review QC and decide' : row.gate_label;
         detail = 'Check the QC plots and reports, then approve or reject this station-month.';
+        if (qcReports(row).length) actions.appendChild(reportLink(qcReports(row)[0], 'button'));
         const plots = el('button', {type: 'button'}, 'View QC plots');
         plots.addEventListener('click', () => setTab('plots'));
         actions.appendChild(plots);
@@ -2212,9 +2223,9 @@ DASHBOARD_SCRIPT = r"""
     }
     function tabsFor(row) {
       const plots = row.qc_artifacts.filter(item => item.kind === 'plot');
-      const reports = row.qc_artifacts.filter(item => item.kind !== 'plot');
+      const reports = qcReports(row);
       return [
-        {id: 'plots', label: 'QC plots', count: plots.length, render: () => plotsPanel(plots)},
+        {id: 'plots', label: 'QC report & plots', count: plots.length + reports.length, render: () => plotsPanel(plots, reports)},
         {id: 'files', label: 'Files & reports', count: row.file_links.length + reports.length, render: () => filesPanel(row, reports)},
         {id: 'exports', label: 'Data exports', count: row.data_exports.length, render: () => exportsPanel(row)},
         {id: 'import', label: 'Import files', count: row.import_artifacts.length, render: () => importPanel(row)},
@@ -2227,8 +2238,13 @@ DASHBOARD_SCRIPT = r"""
       if (value !== undefined) head.appendChild(badge(value, kind));
       return head;
     }
-    function plotsPanel(plotLinks) {
+    function plotsPanel(plotLinks, reports) {
       const wrap = el('div');
+      if (reports.length) {
+        const bar = el('div', {class: 'button-row report-bar'});
+        reports.forEach((item, index) => bar.appendChild(reportLink(item, index === 0 ? 'button primary' : 'button')));
+        wrap.appendChild(bar);
+      }
       if (!plotLinks.length) {
         wrap.appendChild(el('div', {class: 'placeholder'}, 'No plots yet - run QC to generate.'));
         return wrap;

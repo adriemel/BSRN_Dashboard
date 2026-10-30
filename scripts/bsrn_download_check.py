@@ -1986,6 +1986,8 @@ DASHBOARD_CSS = r"""
     #lastActionSource code { font-family: var(--mono); font-size: 12px; }
     pre { margin: 10px 0 0; white-space: pre-wrap; overflow: auto; max-height: 24rem; padding: 14px 16px; background: #1F2328; color: #E6E8EB; border-radius: 8px; font-family: var(--mono); font-size: 12px; line-height: 1.55; }
 
+    .inline-add { max-width: 640px; }
+    .inline-add [data-close-dialog] { display: none; }
     dialog.add-jobs { width: min(540px, calc(100vw - 32px)); padding: 0; border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 16px 48px rgba(31,35,40,.25); color: var(--text); }
     dialog.add-jobs::backdrop { background: rgba(31,35,40,.45); }
     .dialog-body { display: grid; gap: 14px; padding: 22px 24px 24px; }
@@ -2288,14 +2290,16 @@ DASHBOARD_SCRIPT = r"""
       if (!data.rows.length) {
         const empty = el('div', {class: 'placeholder'});
         empty.appendChild(el('p', {}, 'Start with a job code or local DAT file.'));
+        const addForm = addDialog ? addDialog.querySelector('form') : null;
+        let first = empty;
         if (isStatic) {
           empty.appendChild(el('a', {class: 'button primary', href: data.serverUrl}, 'Open local dashboard'));
-        } else {
-          const add = el('button', {type: 'button', class: 'primary'}, 'Add jobs');
-          add.addEventListener('click', openAddJobs);
-          empty.appendChild(add);
+        } else if (addForm) {
+          // On an empty batch the input form is shown directly instead of behind the Add jobs dialog.
+          first = el('section', {class: 'card inline-add', 'aria-label': 'Start a new batch'});
+          first.appendChild(addForm);
         }
-        const nodes = [empty];
+        const nodes = [first];
         if (lastActionNode && lastActionNode.childElementCount) {
           lastActionNode.hidden = false;
           const log = el('section', {class: 'card tabs-card'});
@@ -2345,7 +2349,9 @@ DASHBOARD_SCRIPT = r"""
     }
     const addDialog = document.getElementById('addJobsDialog');
     function openAddJobs() {
-      if (addDialog && typeof addDialog.showModal === 'function') addDialog.showModal();
+      const inlineForm = document.querySelector('.inline-add form');
+      if (inlineForm) inlineForm.querySelector('textarea')?.focus();
+      else if (addDialog && typeof addDialog.showModal === 'function') addDialog.showModal();
     }
     if (addDialog) {
       document.getElementById('openAddJobs').addEventListener('click', openAddJobs);

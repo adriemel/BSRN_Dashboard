@@ -35,6 +35,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from scripts.bsrn_download_check import (  # noqa: E402
     DEFAULT_CONFIG,
+    BSRN_IDS_URL,
     DEFAULT_IDS_DIR,
     JobStatus,
     DASHBOARD_CSS,
@@ -54,6 +55,7 @@ from scripts.bsrn_download_check import (  # noqa: E402
     load_config,
     load_curator_decisions,
     load_reference_id_cache,
+    refresh_bsrn_ids,
     refresh_reference_ids,
     resolve_project_path,
     row_signature,
@@ -534,6 +536,10 @@ def render_dashboard() -> str:
           {csrf_input()}
           <button type="submit">Update reference IDs</button>
         </form>
+        <form method="post" action="/refresh-bsrn-ids" title="Download BSRN_IDs.txt from PANGAEA; used by the next import-file generation">
+          {csrf_input()}
+          <button type="submit">Refresh BSRN_IDs.txt</button>
+        </form>
         <form method="post" action="/new-workflow">
           {csrf_input()}
           <label class="checkline"><input type="checkbox" name="confirm_new" value="1"> Archive current workspace first</label>
@@ -872,6 +878,42 @@ def update_reference_ids_for_current_status() -> ActionResult:
     return result
 
 
+def update_bsrn_ids() -> ActionResult:
+    """Refresh BSRN_IDs.txt; the next import-file generation reads the new copy."""
+    global LAST_ACTION
+    ids_dir = configured_ids_dir()
+    target = ids_dir / "BSRN_IDs.txt"
+    stdout = ""
+    stderr = ""
+    returncode = 0
+    try:
+        refresh_warning = refresh_bsrn_ids(ids_dir)
+        if refresh_warning:
+            stderr = f"WARNING: {refresh_warning}"
+            returncode = 1
+        else:
+            stdout = (
+                f"Downloaded {BSRN_IDS_URL}\nto {target}.\n"
+                "Generate import files to use the new IDs. Metadata and reference import files of the current batch "
+                "are not rebuilt; rerun download/check for that."
+            )
+    except Exception as exc:
+        stderr = str(exc)
+        returncode = 2
+
+    result = ActionResult(
+        title="Refresh BSRN_IDs.txt",
+        command=[],
+        returncode=returncode,
+        stdout=stdout,
+        stderr=stderr,
+        finished_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    )
+    write_last_action_log(result)
+    LAST_ACTION = result
+    return result
+
+
 def start_new_workflow() -> ActionResult:
     global LAST_ACTION
     output_root = STATUS_PATH.parent.parent
@@ -1048,6 +1090,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if parsed.path == "/refresh-reference-ids":
             self.handle_refresh_reference_ids()
             return
+        if parsed.path == "/refresh-bsrn-ids":
+            self.handle_refresh_bsrn_ids()
+            return
         if parsed.path == "/continue-qc":
             self.handle_continue_qc()
             return
@@ -1117,6 +1162,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
     def handle_refresh_reference_ids(self) -> None:
         update_reference_ids_for_current_status()
+        self.redirect_home()
+
+    def handle_refresh_bsrn_ids(self) -> None:
+        update_bsrn_ids()
         self.redirect_home()
 
     def handle_generate_import_files(self, form: dict[str, list[str]]) -> None:

@@ -542,7 +542,7 @@ def render_dashboard() -> str:
         </form>
         <form method="post" action="/new-workflow">
           {csrf_input()}
-          <label class="checkline"><input type="checkbox" name="confirm_new" value="1"> Archive current workspace first</label>
+          <label class="checkline"><input type="checkbox" id="confirmNew" name="confirm_new" value="1"> Archive the current workspace and start a new one</label>
           <button type="submit" class="danger">New workflow</button>
         </form>
       </details>

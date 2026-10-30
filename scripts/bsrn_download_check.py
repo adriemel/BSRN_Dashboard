@@ -2418,6 +2418,15 @@ DASHBOARD_SCRIPT = r"""
     document.querySelector('#lightbox .next').addEventListener('click', () => movePlot(1));
     document.getElementById('lightbox').addEventListener('click', event => { if (event.target.id === 'lightbox') event.currentTarget.classList.remove('open'); });
     document.addEventListener('keydown', event => { if (!lightboxOpen()) return; if (event.key === 'Escape') document.getElementById('lightbox').classList.remove('open'); if (event.key === 'ArrowLeft') movePlot(-1); if (event.key === 'ArrowRight') movePlot(1); });
+    // New workflow always archives output/current, so the button stays disabled until that is confirmed.
+    const confirmNew = document.getElementById('confirmNew');
+    if (confirmNew) {
+      const newButton = confirmNew.form.querySelector('button[type="submit"]');
+      const syncNewButton = () => { newButton.disabled = !confirmNew.checked; };
+      confirmNew.addEventListener('change', syncNewButton);
+      window.addEventListener('pageshow', syncNewButton);
+      syncNewButton();
+    }
     document.getElementById('lastRefreshed').textContent = data.lastRefreshed;
     renderLinks(document.getElementById('globalLinks'), data.globalLinks);
     renderAlert(); renderSummary(); renderList(); renderDetail();

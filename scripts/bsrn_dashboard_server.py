@@ -360,6 +360,9 @@ def server_dashboard_row(row: dict) -> dict[str, object]:
     ]
     import_links = [{"href": href_for(path), "label": label, "kind": "folder"} for path, label in import_artifacts(row) if href_for(path)]
     minute_status, minute_detail = dashboard_minute_completeness(row.get("minute_completeness") or {})
+    import_status = "Import files generated" if row.get("import_ok") and row.get("import_outputs") else "Not run"
+    files_status = "Available" if file_links else "Not run"
+    data_export_status = "Available" if data_export_links else "Warning" if row.get("data_export_warnings") else "Not run"
 
     return {
         "job": str(row.get("job") or ""),
@@ -372,23 +375,28 @@ def server_dashboard_row(row: dict) -> dict[str, object]:
         "gate_label": gate_label,
         "gate_detail": gate_detail if gate_kind == "blocked" else "",
         "action_kind": action,
-        "import_status": "Import files generated" if row.get("import_ok") and row.get("import_outputs") else "Not run",
+        "import_status": import_status,
         "minute_status": minute_status,
         "minute_detail": minute_detail,
-        "files_status": "Available" if file_links else "Not run",
+        "files_status": files_status,
         "file_links": file_links,
         "qc_artifacts": qc_links,
-        "data_export_status": (
-            "Available"
-            if data_export_links
-            else "Warning"
-            if row.get("data_export_warnings")
-            else "Not run"
-        ),
+        "data_export_status": data_export_status,
         "data_exports": data_export_links,
         "can_export_data": bool(row.get("dat_path")),
         "import_artifacts": import_links,
         "details": compact_details(row, gate_kind, gate_detail),
+        "kinds": {
+            "overall": status_kind(overall),
+            "metadata": status_kind(metadata),
+            "format": status_kind(fmt),
+            "qc": status_kind(qc),
+            "gate": status_kind(gate_label),
+            "minutes": status_kind(minute_status),
+            "files": status_kind(files_status),
+            "exports": status_kind(data_export_status),
+            "import": status_kind(import_status),
+        },
     }
 
 
@@ -439,29 +447,601 @@ def dashboard_summary(rows: list[dict[str, object]]) -> dict[str, object]:
     }
 
 
-def render_header_primary_action(statuses: list[dict]) -> str:
-    continuable = [row for row in statuses if row_state(row)[4] == "continue"]
-    import_ready = [row for row in statuses if row_state(row)[4] == "ready"]
-    buttons = []
-    if any(row.get("dat_path") for row in statuses):
-        buttons.append(
-            f'<form method="post" action="/export-data">{csrf_input()}'
-            '<button type="submit" class="primary">Export all data</button></form>'
+def status_kind(value: str) -> str:
+    # Waiting for the curator gets its own colour so it is not confused with a warning.
+    if value == "Awaiting curator approval":
+        return "pending"
+    return status_class(value)
+
+
+def render_header_batch_actions(statuses: list[dict]) -> str:
+    states = [row_state(row)[4] for row in statuses]
+    can_continue = "continue" in states
+    can_generate = "ready" in states
+    actions = (
+        ("/export-data", "Export all data", any(row.get("dat_path") for row in statuses), False, "No downloaded DAT files yet."),
+        ("/continue-qc", "Continue to QC", can_continue, can_continue, "No files are waiting for QC."),
+        (
+            "/generate-import-files",
+            "Generate import files",
+            can_generate,
+            can_generate and not can_continue,
+            "No files with approved QC are waiting for import files.",
+        ),
+    )
+    forms = []
+    for action, label, enabled, primary, reason in actions:
+        css = "primary" if primary else "secondary"
+        title = "Runs for all files in the batch" if enabled else reason
+        disabled = "" if enabled else " disabled"
+        forms.append(
+            f'<form method="post" action="{action}" title="{html.escape(title, quote=True)}">{csrf_input()}'
+            f'<button type="submit" class="{css}"{disabled}>{html.escape(label)}</button></form>'
         )
-    if continuable:
-        buttons.append(
-            f'<form method="post" action="/continue-qc">{csrf_input()}'
-            '<button type="submit" class="primary">Continue to QC</button></form>'
-        )
-        return "".join(buttons)
-    if import_ready:
-        buttons.append(
-            f'<form method="post" action="/generate-import-files">{csrf_input()}'
-            '<button type="submit" class="primary">Generate import files</button></form>'
-        )
-        return "".join(buttons)
-    buttons.append('<a class="button secondary" href="#newWorkflowPanel">Start New Workflow</a>')
-    return "".join(buttons)
+    return "".join(forms)
+
+
+LOGO_SVG = (
+    '<svg class="logo" viewBox="0 0 64 40" aria-hidden="true" focusable="false">'
+    '<path d="M10 31 A22 22 0 0 1 54 31" fill="none" stroke="#E8811A" stroke-width="4" stroke-linecap="round"></path>'
+    '<path d="M19 31 A13 13 0 0 1 45 31" fill="none" stroke="#F5B041" stroke-width="4" stroke-linecap="round"></path>'
+    '<path d="M2 36 Q32 27 62 36" fill="none" stroke="#4E7389" stroke-width="3" stroke-linecap="round"></path>'
+    "</svg>"
+)
+
+DASHBOARD_CSS = r"""
+    :root {
+      color-scheme: light;
+      --text: #1F2328;
+      --soft: #3D4650;
+      --muted: #5C6670;
+      --line: #E2E0D9;
+      --line-soft: #EEECE6;
+      --bg: #F6F5F1;
+      --side: #FBFAF7;
+      --card: #FFFFFF;
+      --accent: #2E5B73;
+      --accent-hover: #244A5E;
+      --accent-soft: #F3F7F9;
+      --accent-line: #B9C6CE;
+      --brand: #E8811A;
+      --ok-fg: #1A6B45; --ok-bg: #E2F1E8; --ok-bar: #3C9A6B;
+      --warning-fg: #875200; --warning-bg: #FDF0D5; --warning-bar: #D99A1E;
+      --error-fg: #B42318; --error-bg: #FDE8E6; --error-bar: #C9402F;
+      --idle-fg: #59606A; --idle-bg: #EEEEEC; --idle-bar: #DAD8D2;
+      --pending-fg: #24506A; --pending-bg: #E4EEF4; --pending-bar: #4E7389;
+      --mono: "Cascadia Mono", Consolas, "SFMono-Regular", Menlo, monospace;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body { margin: 0; font-family: "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif; font-size: 14px; color: var(--text); background: var(--bg); display: flex; flex-direction: column; }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { color: var(--accent-hover); text-decoration: underline; }
+    :focus-visible { outline: 3px solid var(--brand); outline-offset: 2px; }
+    .mono { font-family: var(--mono); }
+    .num { font-variant-numeric: tabular-nums; }
+    h1, h2 { margin: 0; }
+    p { margin: .25rem 0; color: var(--muted); }
+
+    button, .button { display: inline-flex; align-items: center; justify-content: center; gap: .45rem; min-height: 36px; padding: 0 14px; border-radius: 6px; border: 1px solid var(--accent-line); background: var(--card); color: var(--accent); font: inherit; font-size: 13px; font-weight: 600; white-space: nowrap; cursor: pointer; text-decoration: none; }
+    button:hover, .button:hover { background: #F0F4F6; color: var(--accent-hover); text-decoration: none; }
+    button.primary, .button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    button.primary:hover, .button.primary:hover { background: var(--accent-hover); color: #fff; }
+    button.danger { color: var(--error-fg); border-color: #E9B7B2; }
+    button.danger:hover { background: #FDF3F2; color: var(--error-fg); }
+    button.ghost, .button.ghost { background: transparent; border-color: transparent; color: var(--soft); }
+    button.ghost:hover, .button.ghost:hover { background: #ECEBE6; }
+    button.small, .button.small { min-height: 30px; padding: 0 10px; font-size: 12px; }
+    button:disabled, button:disabled:hover { background: #F1F0EC; border-color: var(--line); color: #8A9099; cursor: not-allowed; }
+    form { margin: 0; }
+
+    .topbar { flex: 0 0 auto; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 10px 20px; background: var(--card); border-bottom: 1px solid var(--line); z-index: 10; }
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .logo { width: 44px; height: 28px; flex: 0 0 auto; }
+    .title { font-weight: 700; font-size: 16px; letter-spacing: .01em; white-space: nowrap; }
+    .workspace { color: var(--muted); font-size: 12px; }
+    .global-links { display: flex; flex-wrap: wrap; gap: 2px; }
+    .spacer { flex: 1; }
+    .batch-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-left: 16px; border-left: 1px solid var(--line); }
+    .batch-label { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+
+    .layout { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: 290px minmax(0, 1fr); }
+    .sidebar { min-height: 0; overflow: auto; background: var(--side); border-right: 1px solid var(--line); padding: 18px 14px; display: flex; flex-direction: column; gap: 12px; }
+    .side-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .side-label { color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
+    .side-count { font-size: 13px; color: var(--soft); }
+    .job-list { display: grid; gap: 8px; }
+    .job-button { display: block; width: 100%; min-height: 0; padding: 10px 12px; text-align: left; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--text); font-weight: 400; }
+    .job-button:hover { border-color: var(--accent-line); background: var(--card); color: var(--text); }
+    .job-button.active { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); background: var(--accent-soft); }
+    .job-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+    .job-name { font-family: var(--mono); font-weight: 600; font-size: 14px; }
+    .job-marks { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 8px; }
+    .mark { font-size: 11px; color: var(--idle-fg); white-space: nowrap; }
+    .glyph { font-weight: 700; }
+    .g-ok { color: var(--ok-fg); } .g-warning { color: var(--warning-fg); } .g-error { color: var(--error-fg); } .g-idle { color: #8A9099; font-weight: 400; } .g-pending { color: var(--pending-fg); }
+    .workspace-menu { margin-top: auto; border-top: 1px solid var(--line); padding-top: 10px; }
+    .workspace-menu summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 8px; padding: 8px 6px; border-radius: 6px; font-size: 13px; font-weight: 600; color: var(--soft); }
+    .workspace-menu summary::-webkit-details-marker { display: none; }
+    .workspace-menu summary::after { content: "\25B8"; margin-left: auto; color: var(--muted); transition: transform .15s ease; }
+    .workspace-menu[open] summary::after { transform: rotate(90deg); }
+    .workspace-menu summary:hover { background: #ECEBE6; }
+    .workspace-menu form { display: grid; gap: 8px; padding: 10px 6px 4px; }
+    .workspace-menu form + form { border-top: 1px solid var(--line-soft); }
+    .checkline { display: flex; align-items: center; gap: .45rem; font-size: 13px; color: var(--text); }
+    .checkline input { width: auto; accent-color: var(--accent); }
+
+    .main { min-height: 0; overflow: auto; padding: 22px 28px 48px; display: flex; flex-direction: column; gap: 18px; }
+    .alert { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 12px 16px; border-radius: 8px; background: var(--error-bg); border: 1px solid #F1C0BA; color: var(--error-fg); font-size: 14px; }
+    .alert .spacer { flex: 1; }
+    .summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+    .metric { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; }
+    .metric strong { display: block; font-size: 12px; font-weight: 600; color: var(--muted); }
+    .metric span { display: block; margin-top: 4px; font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .metric.warn { background: var(--warning-bg); border-color: #E8C27A; }
+    .metric.warn strong, .metric.warn span { color: #6B4100; }
+
+    .subhead { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+    .subhead h1 { font-family: var(--mono); font-size: 26px; font-weight: 600; }
+    .badge { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; line-height: 1.35; white-space: nowrap; }
+    .k-ok { background: var(--ok-bg); color: var(--ok-fg); }
+    .k-warning { background: var(--warning-bg); color: var(--warning-fg); }
+    .k-error { background: var(--error-bg); color: var(--error-fg); }
+    .k-idle { background: var(--idle-bg); color: var(--idle-fg); }
+    .k-pending { background: var(--pending-bg); color: var(--pending-fg); }
+
+    .stepper { list-style: none; margin: 0; padding: 16px 20px; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 10px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; }
+    .step { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+    .step-bar { height: 4px; border-radius: 2px; background: var(--idle-bar); }
+    .step.k-ok, .step.k-warning, .step.k-error, .step.k-idle, .step.k-pending { background: none; }
+    .step.k-ok .step-bar { background: var(--ok-bar); }
+    .step.k-warning .step-bar { background: var(--warning-bar); }
+    .step.k-error .step-bar { background: var(--error-bar); }
+    .step.k-pending .step-bar { background: var(--pending-bar); }
+    .step-label { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+    .step-value { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; }
+    .next-step { padding: 18px 22px; display: flex; flex-wrap: wrap; align-items: center; gap: 14px 24px; }
+    .next-text { flex: 1 1 320px; min-width: 0; }
+    .eyebrow { font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+    .next-title { font-size: 18px; font-weight: 600; margin-top: 4px; }
+    .next-detail { font-size: 14px; color: var(--soft); margin-top: 4px; line-height: 1.5; }
+    .button-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    .reject-form { display: flex; flex-wrap: wrap; gap: 8px; }
+    .reject-form input { min-width: 220px; }
+    input, textarea { width: 100%; min-height: 36px; padding: 8px 10px; border: 1px solid #C9CDD2; border-radius: 6px; font: inherit; color: var(--text); background: #fff; }
+    textarea { min-height: 5.4rem; resize: vertical; font-family: var(--mono); font-size: 13px; }
+
+    .details { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+    .detail-line { display: flex; gap: 10px; align-items: baseline; padding: 9px 14px; background: var(--card); border: 1px solid var(--line); border-radius: 8px; font-size: 13px; color: var(--soft); line-height: 1.45; }
+
+    .tabs-card { padding: 0 22px 22px; }
+    .tabs { display: flex; flex-wrap: wrap; gap: 0 22px; border-bottom: 1px solid var(--line); margin-bottom: 18px; }
+    .tab { min-height: 0; padding: 13px 2px 11px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; color: var(--muted); font-size: 14px; }
+    .tab:hover { background: none; color: var(--text); }
+    .tab[aria-selected="true"] { color: var(--text); border-bottom-color: var(--brand); }
+    .tab .count { margin-left: 6px; color: var(--muted); font-weight: 400; }
+    .panel-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+    .panel-head h2 { font-size: 14px; }
+    .link-list { list-style: none; margin: 0 0 18px; padding: 0; border: 1px solid var(--line-soft); border-radius: 8px; overflow: hidden; }
+    .link-list li { border-top: 1px solid var(--line-soft); }
+    .link-list li:first-child { border-top: 0; }
+    .link-list a { display: block; padding: 11px 14px; font-size: 14px; }
+    .link-list a:hover { background: var(--accent-soft); }
+    .placeholder { padding: 32px; border: 1px dashed #C9CDD2; border-radius: 8px; color: var(--muted); text-align: center; background: var(--card); }
+    .plot-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
+    .plot-card { display: block; min-height: 0; padding: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: #fff; text-align: left; color: var(--text); font-weight: 400; }
+    .plot-card:hover { border-color: var(--accent); background: #fff; }
+    .plot-card img { display: block; width: 100%; aspect-ratio: 16 / 10; object-fit: contain; background: #FBFBFA; border-bottom: 1px solid var(--line-soft); }
+    .plot-card span { display: block; padding: 10px 12px; font-size: 13px; font-weight: 600; }
+    #lastActionSource > h2 { display: none; }
+    #lastActionSource .panel { border: 0; padding: 0; }
+    #lastActionSource code { font-family: var(--mono); font-size: 12px; }
+    pre { margin: 10px 0 0; white-space: pre-wrap; overflow: auto; max-height: 24rem; padding: 14px 16px; background: #1F2328; color: #E6E8EB; border-radius: 8px; font-family: var(--mono); font-size: 12px; line-height: 1.55; }
+
+    dialog.add-jobs { width: min(540px, calc(100vw - 32px)); padding: 0; border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 16px 48px rgba(31,35,40,.25); color: var(--text); }
+    dialog.add-jobs::backdrop { background: rgba(31,35,40,.45); }
+    .dialog-body { display: grid; gap: 14px; padding: 22px 24px 24px; }
+    .dialog-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .dialog-head h2 { font-size: 18px; }
+    .dialog-body label { display: grid; gap: 6px; font-size: 13px; font-weight: 600; color: var(--soft); }
+    .hint { font-size: 12px; font-weight: 400; color: var(--muted); }
+    .drop-zone { border: 1px dashed var(--accent); border-radius: 8px; padding: 16px; background: var(--accent-soft); color: var(--accent); cursor: pointer; font-size: 13px; font-weight: 600; text-align: center; }
+    .drop-zone.active { background: #E2ECF1; }
+    .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+    .lightbox { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(20,24,28,.84); z-index: 30; padding: 2rem; overflow: auto; }
+    .lightbox.open { display: flex; }
+    .lightbox img { display: block; width: auto; height: auto; max-width: min(92vw, 1400px); max-height: 84vh; object-fit: contain; background: #fff; border-radius: 6px; }
+    .lightbox button { position: absolute; }
+    .lightbox .prev { left: 1rem; }
+    .lightbox .next { right: 1rem; }
+    .lightbox .close { top: 1rem; right: 1rem; }
+    .lightbox .caption { position: absolute; bottom: 1rem; left: 0; right: 0; text-align: center; color: #fff; font-weight: 600; }
+"""
+
+DASHBOARD_RESPONSIVE_CSS = r"""
+    @media (max-width: 980px) {
+      body { display: block; height: auto; }
+      .layout { grid-template-columns: 1fr; }
+      .sidebar, .main { overflow: visible; }
+      .sidebar { border-right: 0; border-bottom: 1px solid var(--line); }
+      .batch-actions { padding-left: 0; border-left: 0; }
+      .stepper { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .main { padding: 18px 16px 40px; }
+    }
+"""
+
+DASHBOARD_SCRIPT = r"""
+    const data = JSON.parse(document.getElementById('dashboard-data').textContent);
+    let selected = 0;
+    let activeTab = '';
+    // Keep navigation state in this tab across action redirects and refreshes.
+    const selectionKey = 'bsrn-dashboard-selected-job';
+    const tabKey = 'bsrn-dashboard-selected-tab';
+    try {
+      const savedJob = sessionStorage.getItem(selectionKey);
+      selected = Math.max(0, data.rows.findIndex(row => row.job === savedJob));
+      activeTab = sessionStorage.getItem(tabKey) || '';
+    } catch (_) { /* Storage may be disabled; keep the defaults. */ }
+    let plotSet = [];
+    let plotIndex = 0;
+    const lastActionNode = document.getElementById('lastActionSource');
+    const glyphs = {ok: '✓', warning: '▲', error: '✕', idle: '–', pending: '●'};
+    function el(tag, attrs = {}, text = '') {
+      const node = document.createElement(tag);
+      Object.entries(attrs).forEach(([key, value]) => {
+        if (key === 'class') node.className = value;
+        else if (key === 'href') node.href = value;
+        else if (key === 'title') node.title = value;
+        else if (key === 'name') node.name = value;
+        else if (key === 'value') node.value = value;
+        else node.setAttribute(key, value);
+      });
+      if (text) node.textContent = text;
+      return node;
+    }
+    function badge(value, kind) {
+      const k = kind || 'idle';
+      return el('span', {class: 'badge k-' + k}, glyphs[k] + ' ' + (value || 'Not run'));
+    }
+    function renderLinks(target, links) {
+      target.replaceChildren();
+      links.forEach(item => target.appendChild(el('a', {class: 'button ghost small', href: item.href}, item.label)));
+    }
+    function renderAlert() {
+      const box = document.getElementById('lastActionAlert');
+      const action = data.lastAction;
+      if (!action || action.returncode === 0) return;
+      const alert = el('div', {class: 'alert', role: 'alert'});
+      alert.appendChild(el('strong', {}, glyphs.error + ' Last action failed: ' + action.title));
+      alert.appendChild(el('span', {}, 'Exit code ' + action.returncode + ', finished ' + action.finished_at + '.'));
+      alert.appendChild(el('span', {class: 'spacer'}));
+      if (data.rows.length) {
+        const show = el('button', {type: 'button', class: 'small'}, 'Show log');
+        show.addEventListener('click', () => { setTab('log'); document.getElementById('detailTabs')?.scrollIntoView({block: 'start'}); });
+        alert.appendChild(show);
+      }
+      box.replaceChildren(alert);
+    }
+    function renderSummary() {
+      const box = document.getElementById('summary');
+      const items = [
+        ['Files', data.summary.files, ''],
+        ['Minutes OK', data.summary.minutes_ok, data.summary.minutes_warning ? 'warn' : ''],
+        ['Checks OK', data.summary.checks_ok, ''],
+        ['QC complete', data.summary.qc_complete, ''],
+        ['QC approved', data.summary.qc_approved, ''],
+        ['Needs attention', data.summary.needs_attention, data.summary.needs_attention ? 'warn' : '']
+      ];
+      box.replaceChildren(...items.map(([label, value, kind]) => {
+        const card = el('div', {class: 'metric ' + kind});
+        card.appendChild(el('strong', {}, label));
+        card.appendChild(el('span', {}, String(value)));
+        return card;
+      }));
+    }
+    function mark(label, kind, value) {
+      const node = el('span', {class: 'mark', title: label + ': ' + (value || 'Not run')}, label + ' ');
+      node.appendChild(el('span', {class: 'glyph g-' + kind}, glyphs[kind]));
+      return node;
+    }
+    function renderList() {
+      const list = document.getElementById('jobList');
+      document.getElementById('jobCount').textContent = data.rows.length === 1 ? '1 station-month' : data.rows.length + ' station-months';
+      list.replaceChildren();
+      if (!data.rows.length) {
+        list.appendChild(el('p', {}, 'No current run yet.'));
+        return;
+      }
+      data.rows.forEach((row, index) => {
+        const button = el('button', {class: 'job-button' + (index === selected ? ' active' : ''), type: 'button', 'aria-current': index === selected ? 'true' : 'false'});
+        const top = el('span', {class: 'job-top'});
+        top.appendChild(el('span', {class: 'job-name'}, row.job));
+        top.appendChild(el('span', {class: 'glyph g-' + row.kinds.overall, title: 'Overall: ' + row.overall}, glyphs[row.kinds.overall]));
+        button.appendChild(top);
+        const marks = el('span', {class: 'job-marks'});
+        marks.appendChild(mark('Meta', row.kinds.metadata, row.metadata));
+        marks.appendChild(mark('Format', row.kinds.format, row.format));
+        marks.appendChild(mark('QC', row.kinds.qc, row.qc));
+        marks.appendChild(mark('Approval', row.kinds.gate, row.gate_label));
+        button.appendChild(marks);
+        button.addEventListener('click', () => {
+          selected = index;
+          try { sessionStorage.setItem(selectionKey, row.job); } catch (_) {}
+          renderList(); renderDetail();
+        });
+        list.appendChild(button);
+      });
+    }
+    function linkList(items) {
+      const list = el('ul', {class: 'link-list'});
+      items.forEach(item => {
+        const li = el('li');
+        li.appendChild(el('a', {href: item.href}, item.label));
+        list.appendChild(li);
+      });
+      return list;
+    }
+    function postForm(action, label, fields = {}, css = 'primary') {
+      const form = el('form', {method: 'post', action});
+      form.appendChild(el('input', {type: 'hidden', name: 'csrf_token', value: data.csrfToken}));
+      Object.entries(fields).forEach(([name, value]) => form.appendChild(el('input', {type: 'hidden', name, value})));
+      form.appendChild(el('button', {type: 'submit', class: css}, label));
+      return form;
+    }
+    function rejectForm(job) {
+      const form = el('form', {method: 'post', action: '/reject-qc', class: 'reject-form'});
+      form.appendChild(el('input', {type: 'hidden', name: 'csrf_token', value: data.csrfToken}));
+      form.appendChild(el('input', {type: 'hidden', name: 'job', value: job}));
+      form.appendChild(el('input', {name: 'note', placeholder: 'Reason or follow-up', 'aria-label': 'Reason for rejection'}));
+      form.appendChild(el('button', {type: 'submit', class: 'danger'}, 'Reject QC'));
+      return form;
+    }
+    function stepper(row) {
+      const steps = [
+        ['File', row.dat_href ? 'OK' : 'Not run', row.dat_href ? 'ok' : 'idle'],
+        ['Metadata', row.metadata, row.kinds.metadata],
+        ['Format', row.format, row.kinds.format],
+        ['Minutes', row.minute_status, row.kinds.minutes],
+        ['QC', row.qc, row.kinds.qc],
+        ['Approval', row.gate_label, row.kinds.gate],
+        ['Import', row.import_status === 'Import files generated' ? 'OK' : 'Not run', row.kinds.import]
+      ];
+      const wrap = el('ol', {class: 'stepper', 'aria-label': 'Pipeline progress'});
+      steps.forEach(([label, value, kind]) => {
+        const li = el('li', {class: 'step k-' + kind, title: label + ': ' + (value || 'Not run')});
+        li.appendChild(el('span', {class: 'step-bar'}));
+        li.appendChild(el('span', {class: 'step-label'}, label));
+        li.appendChild(el('span', {class: 'step-value g-' + kind}, glyphs[kind] + ' ' + (value || 'Not run')));
+        wrap.appendChild(li);
+      });
+      return wrap;
+    }
+    function actionCard(row) {
+      const node = el('section', {class: 'card next-step', 'aria-label': 'Next step'});
+      const text = el('div', {class: 'next-text'});
+      text.appendChild(el('div', {class: 'eyebrow'}, 'Next step'));
+      const actions = el('div', {class: 'button-row'});
+      let title = row.gate_label || 'No action available';
+      let detail = row.gate_detail || '';
+      if (row.action_kind === 'continue') {
+        title = 'Run QC';
+        detail = 'Checks are finished. Continue to QC runs QC for all files in the batch that are ready.';
+        actions.appendChild(postForm('/continue-qc', 'Continue to QC'));
+      } else if (row.action_kind === 'curator') {
+        title = row.gate_label === 'Awaiting curator approval' ? 'Review QC and decide' : row.gate_label;
+        detail = 'Check the QC plots and reports, then approve or reject this station-month.';
+        const plots = el('button', {type: 'button'}, 'View QC plots');
+        plots.addEventListener('click', () => setTab('plots'));
+        actions.appendChild(plots);
+        actions.appendChild(postForm('/approve-qc', 'Approve QC', {job: row.job}));
+        actions.appendChild(rejectForm(row.job));
+      } else if (row.action_kind === 'ready') {
+        title = 'Generate import files';
+        detail = 'QC is approved. Generate the PANGAEA import files for this station-month.';
+        actions.appendChild(postForm('/generate-import-files', 'Generate import files', {job: row.job}));
+      } else if (row.action_kind === 'import_done') {
+        title = 'Import files generated';
+        detail = 'Import files are available in the Import files tab.';
+        row.import_artifacts.forEach(item => actions.appendChild(el('a', {class: 'button', href: item.href}, item.label)));
+      } else if (!detail) {
+        detail = 'No action available.';
+      }
+      text.appendChild(el('div', {class: 'next-title'}, title));
+      text.appendChild(el('div', {class: 'next-detail'}, detail));
+      node.appendChild(text);
+      node.appendChild(actions);
+      return node;
+    }
+    function tabsFor(row) {
+      const plots = row.qc_artifacts.filter(item => item.kind === 'plot');
+      const reports = row.qc_artifacts.filter(item => item.kind !== 'plot');
+      return [
+        {id: 'plots', label: 'QC plots', count: plots.length, render: () => plotsPanel(plots)},
+        {id: 'files', label: 'Files & reports', count: row.file_links.length + reports.length, render: () => filesPanel(row, reports)},
+        {id: 'exports', label: 'Data exports', count: row.data_exports.length, render: () => exportsPanel(row)},
+        {id: 'import', label: 'Import files', count: row.import_artifacts.length, render: () => importPanel(row)},
+        {id: 'log', label: 'Log', count: null, render: () => logPanel()}
+      ];
+    }
+    function panelHead(title, value, kind) {
+      const head = el('div', {class: 'panel-head'});
+      head.appendChild(el('h2', {}, title));
+      if (value !== undefined) head.appendChild(badge(value, kind));
+      return head;
+    }
+    function plotsPanel(plotLinks) {
+      const wrap = el('div');
+      if (!plotLinks.length) {
+        wrap.appendChild(el('div', {class: 'placeholder'}, 'No plots yet - run QC to generate.'));
+        return wrap;
+      }
+      const grid = el('div', {class: 'plot-grid'});
+      plotLinks.forEach((item, index) => {
+        const fig = el('button', {class: 'plot-card', type: 'button'});
+        fig.appendChild(el('img', {src: plotImageSrc(item), alt: item.label, loading: 'lazy'}));
+        fig.appendChild(el('span', {}, item.label));
+        fig.addEventListener('click', () => openLightbox(plotLinks, index));
+        grid.appendChild(fig);
+      });
+      wrap.appendChild(grid);
+      return wrap;
+    }
+    function filesPanel(row, reports) {
+      const wrap = el('div');
+      wrap.appendChild(panelHead('Files', row.files_status, row.kinds.files));
+      if (row.file_links.length) wrap.appendChild(linkList(row.file_links));
+      else wrap.appendChild(el('p', {}, 'No files linked yet.'));
+      wrap.appendChild(panelHead('QC reports', row.qc, row.kinds.qc));
+      if (reports.length) wrap.appendChild(linkList(reports));
+      else wrap.appendChild(el('p', {}, 'No QC artifacts yet.'));
+      return wrap;
+    }
+    function exportsPanel(row) {
+      const wrap = el('div');
+      const head = panelHead('Data exports', row.data_export_status, row.kinds.exports);
+      if (row.can_export_data) head.appendChild(postForm('/export-data', 'Export data', {job: row.job}, row.data_exports.length ? '' : 'primary'));
+      wrap.appendChild(head);
+      if (row.data_exports.length) wrap.appendChild(linkList(row.data_exports));
+      else wrap.appendChild(el('p', {}, 'No data exports yet.'));
+      return wrap;
+    }
+    function importPanel(row) {
+      const wrap = el('div');
+      wrap.appendChild(panelHead('Import artifacts', row.import_status, row.kinds.import));
+      if (row.import_artifacts.length) wrap.appendChild(linkList(row.import_artifacts));
+      else wrap.appendChild(el('p', {}, 'No import files generated yet.'));
+      return wrap;
+    }
+    function logPanel() {
+      const wrap = el('div', {class: 'log-panel'});
+      if (lastActionNode && lastActionNode.childElementCount) {
+        lastActionNode.hidden = false;
+        wrap.appendChild(lastActionNode);
+      } else {
+        wrap.appendChild(el('p', {}, 'No dashboard action has run yet.'));
+      }
+      return wrap;
+    }
+    function setTab(id) {
+      activeTab = id;
+      try { sessionStorage.setItem(tabKey, id); } catch (_) {}
+      renderDetail();
+    }
+    function renderDetail() {
+      const detail = document.getElementById('detail');
+      if (!data.rows.length) {
+        const empty = el('div', {class: 'placeholder'});
+        empty.appendChild(el('p', {}, 'Start with a job code or local DAT file.'));
+        const add = el('button', {type: 'button', class: 'primary'}, 'Add jobs');
+        add.addEventListener('click', openAddJobs);
+        empty.appendChild(add);
+        const nodes = [empty];
+        if (lastActionNode && lastActionNode.childElementCount) {
+          lastActionNode.hidden = false;
+          const log = el('section', {class: 'card tabs-card'});
+          log.appendChild(el('div', {class: 'tabs'}, ''));
+          log.firstChild.appendChild(el('span', {class: 'tab', 'aria-selected': 'true'}, 'Log'));
+          log.appendChild(lastActionNode);
+          nodes.push(log);
+        }
+        const wrap = el('section', {style: 'display: grid; gap: 18px'});
+        wrap.replaceChildren(...nodes);
+        detail.replaceChildren(wrap);
+        return;
+      }
+      const row = data.rows[selected];
+      const section = el('section', {style: 'display: grid; gap: 18px'});
+      const head = el('div', {class: 'subhead'});
+      head.appendChild(el('h1', {}, row.job));
+      head.appendChild(badge(row.overall, row.kinds.overall));
+      section.appendChild(head);
+      section.appendChild(stepper(row));
+      section.appendChild(actionCard(row));
+      const lines = [];
+      if (row.minute_detail) lines.push(row.minute_detail);
+      lines.push(...row.details);
+      if (lines.length) {
+        const details = el('ul', {class: 'details', 'aria-label': 'Check details'});
+        lines.forEach(text => details.appendChild(el('li', {class: 'detail-line'}, text)));
+        section.appendChild(details);
+      }
+      const tabs = tabsFor(row);
+      if (!tabs.some(tab => tab.id === activeTab)) activeTab = '';
+      if (!activeTab) activeTab = tabs[0].count ? 'plots' : 'files';
+      const card = el('section', {class: 'card tabs-card', id: 'detailTabs'});
+      const bar = el('div', {class: 'tabs', role: 'tablist', 'aria-label': 'Job outputs'});
+      tabs.forEach(tab => {
+        const button = el('button', {type: 'button', class: 'tab', role: 'tab', 'aria-selected': tab.id === activeTab ? 'true' : 'false'}, tab.label);
+        if (tab.count !== null) button.appendChild(el('span', {class: 'count num'}, String(tab.count)));
+        button.addEventListener('click', () => setTab(tab.id));
+        bar.appendChild(button);
+      });
+      card.appendChild(bar);
+      const panel = el('div', {role: 'tabpanel'});
+      panel.appendChild(tabs.find(tab => tab.id === activeTab).render());
+      card.appendChild(panel);
+      section.appendChild(card);
+      detail.replaceChildren(section);
+    }
+    const addDialog = document.getElementById('addJobsDialog');
+    function openAddJobs() {
+      if (addDialog && typeof addDialog.showModal === 'function') addDialog.showModal();
+    }
+    document.getElementById('openAddJobs').addEventListener('click', openAddJobs);
+    addDialog.querySelectorAll('[data-close-dialog]').forEach(button => button.addEventListener('click', () => addDialog.close()));
+    // Close the modal on submit so the loading overlay is not hidden behind it.
+    addDialog.querySelector('form').addEventListener('submit', () => addDialog.close());
+    function appendLocalInputFiles(files) {
+      const textarea = document.getElementById('localFileInput');
+      if (!textarea || !files || !files.length) return;
+      const existing = textarea.value.split(/[\r\n;]+/).map(value => value.trim()).filter(Boolean);
+      const seen = new Set(existing.map(value => value.toLowerCase()));
+      Array.from(files).forEach(file => {
+        if (!file.name.toLowerCase().endsWith('.dat')) return;
+        const path = 'input\\' + file.name;
+        if (!seen.has(path.toLowerCase())) {
+          existing.push(path);
+          seen.add(path.toLowerCase());
+        }
+      });
+      textarea.value = existing.join('\n');
+    }
+    const dropZone = document.getElementById('localDropZone');
+    const picker = document.getElementById('localFilePicker');
+    if (dropZone && picker) {
+      dropZone.addEventListener('click', () => picker.click());
+      dropZone.addEventListener('keydown', event => {
+        if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); picker.click(); }
+      });
+      picker.addEventListener('change', event => appendLocalInputFiles(event.target.files));
+      ['dragenter', 'dragover'].forEach(type => dropZone.addEventListener(type, event => {
+        event.preventDefault();
+        dropZone.classList.add('active');
+      }));
+      ['dragleave', 'drop'].forEach(type => dropZone.addEventListener(type, event => {
+        event.preventDefault();
+        dropZone.classList.remove('active');
+      }));
+      dropZone.addEventListener('drop', event => appendLocalInputFiles(event.dataTransfer.files));
+    }
+    function plotImageSrc(item) { const version = item.version || data.lastRefreshed; return version ? item.href + '?v=' + encodeURIComponent(version) : item.href; }
+    function openLightbox(items, index) { plotSet = items; plotIndex = index; updateLightbox(); document.getElementById('lightbox').classList.add('open'); }
+    function updateLightbox() { const img = document.querySelector('#lightbox img'); if (plotSet.length) { img.src = plotImageSrc(plotSet[plotIndex]); img.alt = plotSet[plotIndex].label; document.querySelector('#lightbox .caption').textContent = plotSet[plotIndex].label; } }
+    function lightboxOpen() { return document.getElementById('lightbox').classList.contains('open'); }
+    function movePlot(delta) { if (!plotSet.length) return; plotIndex = (plotIndex + delta + plotSet.length) % plotSet.length; updateLightbox(); }
+    document.querySelector('#lightbox .close').addEventListener('click', () => document.getElementById('lightbox').classList.remove('open'));
+    document.querySelector('#lightbox .prev').addEventListener('click', () => movePlot(-1));
+    document.querySelector('#lightbox .next').addEventListener('click', () => movePlot(1));
+    document.getElementById('lightbox').addEventListener('click', event => { if (event.target.id === 'lightbox') event.currentTarget.classList.remove('open'); });
+    document.addEventListener('keydown', event => { if (!lightboxOpen()) return; if (event.key === 'Escape') document.getElementById('lightbox').classList.remove('open'); if (event.key === 'ArrowLeft') movePlot(-1); if (event.key === 'ArrowRight') movePlot(1); });
+    document.getElementById('lastRefreshed').textContent = data.lastRefreshed;
+    renderLinks(document.getElementById('globalLinks'), data.globalLinks);
+    renderAlert(); renderSummary(); renderList(); renderDetail();
+    document.querySelector('.job-button.active')?.scrollIntoView({block: 'nearest'});
+"""
 
 
 def render_dashboard() -> str:
@@ -475,16 +1055,22 @@ def render_dashboard() -> str:
     if metadata_dir is not None and href_for(metadata_dir):
         global_links.append({"href": href_for(metadata_dir), "label": "Metadata files"})
     global_links.extend(batch_links)
+    last_result = LAST_ACTION or read_last_action_log()
     payload = {
         "rows": rows,
         "summary": summary,
         "globalLinks": global_links,
         "lastRefreshed": now,
+        "lastAction": (
+            {"title": last_result.title, "finished_at": last_result.finished_at, "returncode": last_result.returncode}
+            if last_result is not None
+            else None
+        ),
         "csrfToken": CSRF_TOKEN,
     }
     data_json = json_for_html_script(payload)
     last_action = render_last_action()
-    primary_action = render_header_primary_action(statuses)
+    batch_actions = render_header_batch_actions(statuses)
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -492,422 +1078,84 @@ def render_dashboard() -> str:
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>BSRN Workflow Dashboard</title>
   <style>
-    :root {{
-      color-scheme: light;
-      --header: #12343c;
-      --text: #12343c;
-      --muted: #47636a;
-      --line: #acc4d4;
-      --bg: #edf4f4;
-      --card: #fff;
-      --blue: #046c8c;
-      --green: #448474;
-      --red: #c4573b;
-      --amber: #ffbd3d;
-      --gray: #acc4d4;
-      --active: #e2eded;
-    }}
-    * {{ box-sizing: border-box; }}
-    body {{ font-family: "Segoe UI", "Trebuchet MS", Arial, sans-serif; margin: 0; color: var(--text); background: var(--bg); background-image: radial-gradient(1100px 500px at 85% -10%, rgba(255,189,61,.13), transparent 60%), radial-gradient(900px 600px at -10% 110%, rgba(4,108,140,.10), transparent 55%); background-attachment: fixed; }}
-    h1, h2, .title {{ font-family: Georgia, "Times New Roman", serif; letter-spacing: .01em; }}
-    a {{ color: var(--blue); text-decoration: none; }}
-    a:hover {{ text-decoration: underline; }}
-    .topbar {{ position: fixed; inset: 0 0 auto 0; min-height: 60px; display: flex; align-items: center; gap: .75rem; padding: .55rem 1rem; background: var(--header); border-bottom: 3px solid #ffbd3d; z-index: 10; }}
-    .title {{ font-weight: 700; font-size: 16px; white-space: nowrap; color: #ffbd3d; }}
-    .workspace {{ color: #9fb6bc; font-size: 12px; }}
-    .spacer {{ flex: 1; }}
-    .pill-links {{ display: flex; flex-wrap: wrap; gap: .4rem; min-width: 0; }}
-    .pill, button, .button {{ display: inline-flex; align-items: center; justify-content: center; gap: .35rem; border: 1px solid var(--line); border-radius: 999px; padding: .36rem .62rem; background: #fff; font: inherit; font-size: 13px; font-weight: 700; color: var(--blue); cursor: pointer; }}
-    button.primary, .button.primary {{ border-radius: 6px; border-color: var(--blue); background: var(--blue); color: #fff; }}
-    button.secondary, .button.secondary {{ border-radius: 6px; border-color: var(--blue); color: var(--blue); background: #fff; }}
-    .topbar .button, .topbar button {{ white-space: nowrap; flex: 0 0 auto; }}
-    .topbar button.primary, .topbar .button.primary {{ background: #ffbd3d; border-color: #ffbd3d; color: #4a3206; }}
-    .topbar button.secondary, .topbar .button.secondary {{ background: transparent; border-color: #4f6d75; color: #e8eff1; }}
-    .topbar form {{ display: inline-flex; }}
-    .layout {{ display: grid; grid-template-columns: 220px minmax(0, 1fr); padding-top: 60px; min-height: 100vh; }}
-    .sidebar {{ position: sticky; top: 60px; height: calc(100vh - 60px); overflow: auto; background: #e8eff1; border-right: 1px solid var(--line); padding: 1rem .75rem; }}
-    .side-label {{ color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; margin: 0 0 .7rem; }}
-    .job-list {{ display: grid; gap: .35rem; }}
-    .job-button {{ width: 100%; justify-content: flex-start; text-align: left; border: 1px solid var(--line); border-left: 3px solid transparent; border-radius: 6px; padding: .58rem .6rem; background: #fff; color: var(--text); }}
-    .job-button.active {{ border-left-color: var(--blue); background: var(--active); }}
-    .job-name {{ display: block; font-weight: 700; margin-bottom: .35rem; }}
-    .job-approval {{ display: block; margin-top: .3rem; color: #246b48; font-size: 11px; font-weight: 700; }}
-    .dots {{ display: flex; gap: .25rem; }}
-    .dot {{ width: 9px; height: 9px; border-radius: 999px; background: var(--gray); }}
-    .main {{ padding: 1.1rem 1.4rem 2rem; overflow: auto; }}
-    .summary {{ display: grid; grid-template-columns: repeat(6, minmax(7rem, 1fr)); gap: .75rem; margin-bottom: 1rem; }}
-    .metric {{ background: var(--card); border-radius: 8px; border: 1px solid var(--line); border-left: 4px solid var(--blue); box-shadow: 0 2px 8px rgba(0,0,0,.08); padding: .65rem .8rem; }}
-    .metric strong {{ display: block; font-size: 12px; color: var(--muted); margin-bottom: .25rem; }}
-    .metric span {{ font-weight: 800; font-size: 20px; }}
-    .metric.ok {{ border-left-color: var(--green); color: #fff; }}
-    .metric.ok strong, .metric.ok span {{ color: #fff; }}
-    .metric.warn {{ border-left-color: var(--amber); }}
-    .subhead {{ display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; margin: .4rem 0 1rem; }}
-    h1 {{ font-size: 24px; margin: 0 .4rem 0 0; }}
-    h2 {{ font-size: 15px; margin: 0 0 .55rem; }}
-    p {{ margin: .25rem 0; color: var(--muted); }}
-    .card, .panel, .notice {{ background: var(--card); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,.08); padding: .9rem; }}
-    .sidebar .panel {{ margin-top: 1rem; box-shadow: none; }}
-    .sidebar .panel .side-label {{ color: var(--muted); }}
-    .sidebar details summary {{ cursor: pointer; list-style: none; display: flex; align-items: center; justify-content: space-between; gap: .5rem; }}
-    .sidebar details summary::-webkit-details-marker {{ display: none; }}
-    .sidebar details > summary.side-label::after {{ content: "\\25B8"; font-size: 13px; color: var(--blue); transition: transform .15s ease; }}
-    .sidebar details[open] > summary.side-label::after {{ transform: rotate(90deg); }}
-    .sidebar .start-panel {{ margin-top: 0; margin-bottom: 1.1rem; }}
-    .sidebar .batch-label {{ margin-top: .2rem; }}
-    .sidebar .panel form + form {{ margin-top: .8rem; padding-top: .8rem; border-top: 1px solid var(--line); }}
-    form {{ display: grid; gap: .6rem; }}
-    label {{ display: grid; gap: .25rem; color: var(--muted); font-size: 0.85rem; }}
-    .checkline {{ display: flex; align-items: center; gap: 0.45rem; color: var(--text); }}
-    .checkline input {{ width: auto; }}
-    input, textarea {{ width: 100%; padding: 0.48rem 0.55rem; border: 1px solid var(--line); border-radius: 4px; font: inherit; }}
-    textarea {{ min-height: 5.4rem; resize: vertical; }}
-    .drop-zone {{ border: 1px dashed var(--blue); border-radius: 6px; padding: .65rem; background: #f7fbfc; color: var(--muted); cursor: pointer; font-size: 12px; text-align: center; }}
-    .drop-zone.active {{ background: #e2eded; color: var(--text); }}
-    .badge {{ display: inline-flex; align-items: center; border-radius: 999px; padding: .2rem .5rem; font-size: 12px; font-weight: 800; color: #fff; background: var(--gray); }}
-    .ok {{ background: var(--green); }}
-    .warning, .fail {{ background: var(--amber); color: #4a3206; }}
-    .error {{ background: var(--red); }}
-    .idle {{ background: var(--gray); }}
-    .cards {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .85rem; }}
-    .links, .button-row {{ display: flex; flex-wrap: wrap; gap: .45rem; margin-top: .55rem; }}
-    .details {{ margin-top: .85rem; display: grid; gap: .4rem; color: #374151; font-size: 13px; }}
-    .detail-line {{ padding: .45rem .55rem; background: #f9fafb; border: 1px solid var(--line); border-radius: 6px; }}
-    .stepper {{ list-style: none; display: flex; flex-wrap: wrap; gap: 0; margin: .2rem 0 1.1rem; padding: .75rem .9rem; background: var(--card); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,.08); }}
-    .step {{ flex: 1 1 0; min-width: 6.5rem; position: relative; display: grid; justify-items: center; gap: .3rem; padding: .15rem .35rem; text-align: center; }}
-    .step::before {{ content: ""; position: absolute; top: 8px; left: -50%; width: 100%; height: 2px; background: var(--line); }}
-    .step:first-child::before {{ display: none; }}
-    .step-dot {{ width: 18px; height: 18px; border-radius: 999px; background: var(--gray); border: 3px solid #fff; box-shadow: 0 0 0 1px var(--line); position: relative; z-index: 1; }}
-    .step.state-ok .step-dot {{ background: var(--green); }}
-    .step.state-ok::before {{ background: var(--green); }}
-    .step.state-warning .step-dot {{ background: var(--amber); box-shadow: 0 0 0 1px #c9881c; }}
-    .step.state-error .step-dot {{ background: var(--red); }}
-    .step-label {{ font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }}
-    .step-value {{ font-size: 12px; font-weight: 700; color: var(--text); max-width: 11rem; }}
-    .step.state-idle .step-value {{ color: var(--muted); font-weight: 600; }}
-    .card.action {{ grid-column: 1 / -1; border-left: 4px solid var(--blue); }}
-    .plots {{ margin-top: 1rem; }}
-    .plot-grid {{ display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .8rem; }}
-    .plot-card {{ border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: #fff; cursor: pointer; padding: 0; display: block; text-align: left; color: var(--text); }}
-    .plot-card img {{ display: block; width: 100%; aspect-ratio: 16 / 10; object-fit: contain; background: #f9fafb; }}
-    .plot-card span {{ display: block; padding: .5rem .6rem; font-size: 12px; font-weight: 700; color: #374151; }}
-    .placeholder {{ border: 1px dashed #9ca3af; border-radius: 8px; padding: 1.2rem; color: var(--muted); background: #fff; }}
-    .last-action {{ margin-top: 1rem; }}
-    pre {{ white-space: pre-wrap; overflow: auto; max-height: 18rem; padding: .75rem; background: #111827; color: #e5e7eb; border-radius: 6px; }}
-    .lightbox {{ position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(17,24,39,.82); z-index: 30; padding: 2rem; overflow: auto; }}
-    .lightbox.open {{ display: flex; }}
-    .lightbox img {{ display: block; width: auto; height: auto; max-width: min(96vw, 1400px); max-height: 86vh; object-fit: contain; background: #fff; }}
-    .lightbox button {{ position: absolute; border: 0; background: rgba(255,255,255,.92); color: var(--text); border-radius: 6px; padding: .5rem .7rem; font-weight: 800; cursor: pointer; }}
-    .lightbox .prev {{ left: 1rem; }}
-    .lightbox .next {{ right: 1rem; }}
-    .lightbox .close {{ top: 1rem; right: 1rem; }}
+    {DASHBOARD_CSS}
     {loading_overlay_css()}
-    @media (max-width: 980px) {{
-      .topbar {{ position: static; height: auto; flex-wrap: wrap; padding: .75rem; }}
-      .topbar .spacer {{ display: none; }}
-      .pill-links {{ flex: 1 1 100%; order: 3; }}
-      .layout {{ grid-template-columns: 1fr; padding-top: 0; }}
-      .sidebar {{ position: static; height: auto; }}
-      .summary, .cards, .plot-grid {{ grid-template-columns: 1fr; }}
-    }}
+    {DASHBOARD_RESPONSIVE_CSS}
   </style>
 </head>
 <body>
   <header class="topbar">
-    <div>
-      <div class="title">BSRN Workflow Dashboard</div>
-      <div class="workspace">output/current - local dashboard server - refreshed <span id="lastRefreshed"></span></div>
+    <div class="brand">
+      {LOGO_SVG}
+      <div>
+        <div class="title">BSRN Workflow Dashboard</div>
+        <div class="workspace">output/current · refreshed <span id="lastRefreshed" class="num"></span></div>
+      </div>
     </div>
+    <nav class="global-links" id="globalLinks" aria-label="Batch files"></nav>
     <div class="spacer"></div>
-    <nav class="pill-links" id="globalLinks"></nav>
-    {primary_action}
-    <a class="button secondary" href="/" title="Refresh dashboard">Refresh</a>
+    <div class="batch-actions" role="group" aria-label="Actions for all files">
+      <span class="batch-label">All files</span>
+      {batch_actions}
+    </div>
+    <a class="button" href="/" title="Refresh dashboard">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" focusable="false"><path d="M20 11a8 8 0 1 0-2.3 5.7"></path><path d="M20 4v7h-7"></path></svg>
+      Refresh
+    </a>
   </header>
   <div class="layout">
     <aside class="sidebar">
-      <details class="panel start-panel" open>
-        <summary class="side-label">1 - Start Download</summary>
-        <form method="post" action="/run-download">
-          {csrf_input()}
-          <label>Job codes<textarea name="job" placeholder="gob0624&#10;cab0425 pay0123"></textarea></label>
-          <label>Local DAT files<textarea id="localFileInput" name="local_file" placeholder="input\\cab0325.dat&#10;input\\pay0123.dat"></textarea></label>
-          <input id="localFilePicker" type="file" accept=".dat" multiple hidden>
-          <div id="localDropZone" class="drop-zone" role="button" tabindex="0">Drop or select DAT files from input</div>
-          <button type="submit" class="primary">Run download/check</button>
-        </form>
-      </details>
-      <div class="side-label batch-label">2 - Current batch</div>
+      <div class="side-head">
+        <div>
+          <div class="side-label">Current batch</div>
+          <div class="side-count num" id="jobCount"></div>
+        </div>
+        <button type="button" class="small" id="openAddJobs">+ Add jobs</button>
+      </div>
       <div class="job-list" id="jobList"></div>
-      <details class="panel" id="newWorkflowPanel">
-        <summary class="side-label">Utilities</summary>
+      <details class="workspace-menu" id="newWorkflowPanel">
+        <summary>Workspace actions</summary>
         <form method="post" action="/refresh-reference-ids">
           {csrf_input()}
-          <button type="submit" class="secondary">Update reference IDs</button>
+          <button type="submit">Update reference IDs</button>
         </form>
         <form method="post" action="/new-workflow">
           {csrf_input()}
           <label class="checkline"><input type="checkbox" name="confirm_new" value="1"> Archive current workspace first</label>
-          <button type="submit" class="secondary">New workflow</button>
+          <button type="submit" class="danger">New workflow</button>
         </form>
       </details>
     </aside>
     <main class="main">
-      <section class="summary" id="summary"></section>
+      <div id="lastActionAlert"></div>
+      <section class="summary" id="summary" aria-label="Batch summary"></section>
       <section id="detail"></section>
-      {last_action}
     </main>
   </div>
-  <div class="lightbox" id="lightbox"><button class="close" type="button">Close</button><button class="prev" type="button">&lt;</button><img alt=""><button class="next" type="button">&gt;</button></div>
+  <div id="lastActionSource" hidden>{last_action}</div>
+  <dialog class="add-jobs" id="addJobsDialog" aria-labelledby="addJobsTitle">
+    <form method="post" action="/run-download" class="dialog-body">
+      {csrf_input()}
+      <div class="dialog-head">
+        <h2 id="addJobsTitle">Add station-months</h2>
+        <button type="button" class="ghost small" data-close-dialog aria-label="Close">Close</button>
+      </div>
+      <label>Job codes from BSRN FTP<textarea name="job" placeholder="gob0624&#10;cab0425 pay0123"></textarea></label>
+      <label>Local DAT files <span class="hint">(fill either job codes or local files, not both)</span><textarea id="localFileInput" name="local_file" placeholder="input\\cab0325.dat&#10;input\\pay0123.dat"></textarea></label>
+      <input id="localFilePicker" type="file" accept=".dat" multiple hidden>
+      <div id="localDropZone" class="drop-zone" role="button" tabindex="0">Drop or select DAT files from input</div>
+      <div class="dialog-actions">
+        <button type="button" data-close-dialog>Cancel</button>
+        <button type="submit" class="primary">Run download/check</button>
+      </div>
+    </form>
+  </dialog>
+  <div class="lightbox" id="lightbox"><button class="close" type="button">Close</button><button class="prev" type="button" aria-label="Previous plot">&lt;</button><img alt=""><button class="next" type="button" aria-label="Next plot">&gt;</button><div class="caption"></div></div>
   {loading_overlay_html()}
   <script id="dashboard-data" type="application/json">{data_json}</script>
   <script>
-    const data = JSON.parse(document.getElementById('dashboard-data').textContent);
-    let selected = 0;
-    // Keep navigation state in this tab across action redirects and refreshes.
-    const selectionKey = 'bsrn-dashboard-selected-job';
-    try {{
-      const savedJob = sessionStorage.getItem(selectionKey);
-      selected = Math.max(0, data.rows.findIndex(row => row.job === savedJob));
-    }} catch (_) {{ /* Storage may be disabled; keep the first-row fallback. */ }}
-    let plotSet = [];
-    let plotIndex = 0;
     {loading_overlay_script()}
-    const cls = value => {{
-      if (!value) return 'idle';
-      if (/^\\d+$/.test(String(value))) return 'ok';
-      const text = String(value).toLowerCase();
-      if (text.includes('error') || text.includes('blocked') || text.includes('rejected') || text.includes('failed')) return 'error';
-      if (text.includes('warning') || text.includes('fail') || text.includes('awaiting') || text.includes('stale') || text.includes('missing')) return 'warning';
-      if (text.includes('ok') || text.includes('available') || text.includes('approved') || text.includes('generated')) return 'ok';
-      return 'idle';
-    }};
-    function el(tag, attrs = {{}}, text = '') {{
-      const node = document.createElement(tag);
-      Object.entries(attrs).forEach(([key, value]) => {{
-        if (key === 'class') node.className = value;
-        else if (key === 'href') node.href = value;
-        else if (key === 'title') node.title = value;
-        else if (key === 'name') node.name = value;
-        else if (key === 'value') node.value = value;
-        else node.setAttribute(key, value);
-      }});
-      if (text) node.textContent = text;
-      return node;
-    }}
-    function badge(value) {{ return el('span', {{class: 'badge ' + cls(value)}}, value || 'Not run'); }}
-    function renderLinks(target, links, css = 'pill') {{
-      target.replaceChildren();
-      links.forEach(item => target.appendChild(el('a', {{class: css, href: item.href}}, item.label)));
-    }}
-    function renderSummary() {{
-      const box = document.getElementById('summary');
-      const items = [
-        ['Files', data.summary.files, ''],
-        ['Minutes OK', data.summary.minutes_ok, data.summary.minutes_warning ? 'warn' : 'ok'],
-        ['Checks OK', data.summary.checks_ok, 'ok'],
-        ['QC complete', data.summary.qc_complete, 'ok'],
-        ['QC approved', data.summary.qc_approved, 'ok'],
-        ['Needs attention', data.summary.needs_attention, 'warn']
-      ];
-      box.replaceChildren(...items.map(([label, value, kind]) => {{
-        const card = el('div', {{class: 'metric ' + kind}});
-        card.appendChild(el('strong', {{}}, label));
-        card.appendChild(el('span', {{}}, String(value)));
-        return card;
-      }}));
-    }}
-    function renderList() {{
-      const list = document.getElementById('jobList');
-      list.replaceChildren();
-      if (!data.rows.length) {{
-        list.appendChild(el('p', {{}}, 'No current run yet.'));
-        return;
-      }}
-      data.rows.forEach((row, index) => {{
-        const button = el('button', {{class: 'job-button' + (index === selected ? ' active' : ''), type: 'button'}});
-        const content = el('span');
-        content.appendChild(el('span', {{class: 'job-name'}}, row.job));
-        const dots = el('span', {{class: 'dots'}});
-        [row.metadata, row.format, row.qc].forEach(value => dots.appendChild(el('span', {{class: 'dot ' + cls(value), title: value}})));
-        content.appendChild(dots);
-        if (['QC approved', 'Import files generated'].includes(row.gate_label)) {{
-          content.appendChild(el('span', {{class: 'job-approval', title: 'QC approved'}}, '\u2713 Approved'));
-        }}
-        button.appendChild(content);
-        button.addEventListener('click', () => {{
-          selected = index;
-          try {{ sessionStorage.setItem(selectionKey, row.job); }} catch (_) {{}}
-          renderList(); renderDetail();
-        }});
-        list.appendChild(button);
-      }});
-    }}
-    function linkList(items, emptyText) {{
-      const wrap = el('div', {{class: 'links'}});
-      if (!items.length && emptyText) wrap.appendChild(el('p', {{}}, emptyText));
-      items.forEach(item => wrap.appendChild(el('a', {{class: 'pill', href: item.href}}, item.label)));
-      return wrap;
-    }}
-    function postForm(action, label, fields = {{}}, css = 'primary') {{
-      const form = el('form', {{method: 'post', action}});
-      form.appendChild(el('input', {{type: 'hidden', name: 'csrf_token', value: data.csrfToken}}));
-      Object.entries(fields).forEach(([name, value]) => form.appendChild(el('input', {{type: 'hidden', name, value}})));
-      form.appendChild(el('button', {{type: 'submit', class: css}}, label));
-      return form;
-    }}
-    function rejectForm(job) {{
-      const form = el('form', {{method: 'post', action: '/reject-qc'}});
-      form.appendChild(el('input', {{type: 'hidden', name: 'csrf_token', value: data.csrfToken}}));
-      form.appendChild(el('input', {{type: 'hidden', name: 'job', value: job}}));
-      form.appendChild(el('input', {{name: 'note', placeholder: 'Reason or follow-up'}}));
-      form.appendChild(el('button', {{type: 'submit', class: 'secondary'}}, 'Reject QC'));
-      return form;
-    }}
-    function card(title, status, links, emptyText) {{
-      const node = el('article', {{class: 'card'}});
-      node.appendChild(el('h2', {{}}, title));
-      node.appendChild(badge(status));
-      node.appendChild(linkList(links, emptyText));
-      return node;
-    }}
-    function dataExportCard(row) {{
-      const node = card('Data exports', row.data_export_status, row.data_exports, 'No data exports yet.');
-      if (row.can_export_data) {{
-        const actions = el('div', {{class: 'button-row'}});
-        actions.appendChild(postForm('/export-data', 'Export data', {{job: row.job}}, row.data_exports.length ? 'secondary' : 'primary'));
-        node.appendChild(actions);
-      }}
-      return node;
-    }}
-    function stepper(row) {{
-      const steps = [
-        ['File', row.dat_href ? 'OK' : 'Not run'],
-        ['Metadata', row.metadata],
-        ['Format', row.format],
-        ['QC', row.qc],
-        ['Approval', row.gate_label],
-        ['Import', row.import_status === 'Import files generated' ? 'OK' : 'Not run']
-      ];
-      const wrap = el('ol', {{class: 'stepper'}});
-      steps.forEach(([label, value]) => {{
-        const li = el('li', {{class: 'step state-' + cls(value), title: label + ': ' + (value || 'Not run')}});
-        li.appendChild(el('span', {{class: 'step-dot'}}));
-        li.appendChild(el('span', {{class: 'step-label'}}, label));
-        li.appendChild(el('span', {{class: 'step-value'}}, value || 'Not run'));
-        wrap.appendChild(li);
-      }});
-      return wrap;
-    }}
-    function actionCard(row) {{
-      const node = el('article', {{class: 'card action'}});
-      node.appendChild(el('h2', {{}}, 'Next step'));
-      node.appendChild(badge(row.gate_label));
-      const actions = el('div', {{class: 'button-row'}});
-      if (row.action_kind === 'continue') actions.appendChild(postForm('/continue-qc', 'Continue to QC'));
-      else if (row.action_kind === 'curator') {{
-        actions.appendChild(postForm('/approve-qc', 'Approve QC', {{job: row.job}}));
-        actions.appendChild(rejectForm(row.job));
-      }} else if (row.action_kind === 'ready') actions.appendChild(postForm('/generate-import-files', 'Generate import files', {{job: row.job}}));
-      else if (row.action_kind === 'import_done') row.import_artifacts.forEach(item => actions.appendChild(el('a', {{class: 'pill', href: item.href}}, item.label)));
-      else actions.appendChild(el('p', {{}}, row.gate_detail || 'No action available.'));
-      node.appendChild(actions);
-      return node;
-    }}
-    function renderDetail() {{
-      const detail = document.getElementById('detail');
-      if (!data.rows.length) {{
-        detail.replaceChildren(el('div', {{class: 'placeholder'}}, 'Start with a job code or local DAT file.'));
-        return;
-      }}
-      const row = data.rows[selected];
-      const section = el('section');
-      const head = el('div', {{class: 'subhead'}});
-      head.appendChild(el('h1', {{}}, row.job));
-      head.appendChild(badge(row.overall));
-      section.appendChild(head);
-      section.appendChild(stepper(row));
-      const cards = el('div', {{class: 'cards'}});
-      cards.appendChild(actionCard(row));
-      cards.appendChild(card('Files', row.files_status, row.file_links, 'No files linked yet.'));
-      cards.appendChild(card('QC artifacts', row.qc, row.qc_artifacts, 'No QC artifacts yet.'));
-      cards.appendChild(dataExportCard(row));
-      cards.appendChild(card('Import artifacts', row.import_status, row.import_artifacts, 'No import files generated yet.'));
-      cards.appendChild(card('Minute completeness', row.minute_status, [], row.minute_detail || 'Not available.'));
-      section.appendChild(cards);
-      if (row.details.length) {{
-        const details = el('div', {{class: 'details'}});
-        row.details.forEach(text => details.appendChild(el('div', {{class: 'detail-line'}}, text)));
-        section.appendChild(details);
-      }}
-      const plots = el('section', {{class: 'plots'}});
-      plots.appendChild(el('h2', {{}}, 'QC Plots'));
-      const plotLinks = row.qc_artifacts.filter(item => item.kind === 'plot');
-      if (!plotLinks.length) {{
-        plots.appendChild(el('div', {{class: 'placeholder'}}, 'No plots yet - run QC to generate.'));
-      }} else {{
-        const grid = el('div', {{class: 'plot-grid'}});
-        plotLinks.forEach((item, index) => {{
-          const fig = el('button', {{class: 'plot-card', type: 'button'}});
-          fig.appendChild(el('img', {{src: plotImageSrc(item), alt: item.label}}));
-          fig.appendChild(el('span', {{}}, item.label));
-          fig.addEventListener('click', () => openLightbox(plotLinks, index));
-          grid.appendChild(fig);
-        }});
-        plots.appendChild(grid);
-      }}
-      section.appendChild(plots);
-      detail.replaceChildren(section);
-    }}
-    function appendLocalInputFiles(files) {{
-      const textarea = document.getElementById('localFileInput');
-      if (!textarea || !files || !files.length) return;
-      const existing = textarea.value.split(/[\\r\\n;]+/).map(value => value.trim()).filter(Boolean);
-      const seen = new Set(existing.map(value => value.toLowerCase()));
-      Array.from(files).forEach(file => {{
-        if (!file.name.toLowerCase().endsWith('.dat')) return;
-        const path = 'input\\\\' + file.name;
-        if (!seen.has(path.toLowerCase())) {{
-          existing.push(path);
-          seen.add(path.toLowerCase());
-        }}
-      }});
-      textarea.value = existing.join('\\n');
-    }}
-    const dropZone = document.getElementById('localDropZone');
-    const picker = document.getElementById('localFilePicker');
-    if (dropZone && picker) {{
-      dropZone.addEventListener('click', () => picker.click());
-      dropZone.addEventListener('keydown', event => {{
-        if (event.key === 'Enter' || event.key === ' ') {{ event.preventDefault(); picker.click(); }}
-      }});
-      picker.addEventListener('change', event => appendLocalInputFiles(event.target.files));
-      ['dragenter', 'dragover'].forEach(type => dropZone.addEventListener(type, event => {{
-        event.preventDefault();
-        dropZone.classList.add('active');
-      }}));
-      ['dragleave', 'drop'].forEach(type => dropZone.addEventListener(type, event => {{
-        event.preventDefault();
-        dropZone.classList.remove('active');
-      }}));
-      dropZone.addEventListener('drop', event => appendLocalInputFiles(event.dataTransfer.files));
-    }}
-    function plotImageSrc(item) {{ const version = item.version || data.lastRefreshed; return version ? item.href + '?v=' + encodeURIComponent(version) : item.href; }}
-    function openLightbox(items, index) {{ plotSet = items; plotIndex = index; updateLightbox(); document.getElementById('lightbox').classList.add('open'); }}
-    function updateLightbox() {{ const img = document.querySelector('#lightbox img'); if (plotSet.length) {{ img.src = plotImageSrc(plotSet[plotIndex]); img.alt = plotSet[plotIndex].label; }} }}
-    function movePlot(delta) {{ if (!plotSet.length) return; plotIndex = (plotIndex + delta + plotSet.length) % plotSet.length; updateLightbox(); }}
-    document.querySelector('#lightbox .close').addEventListener('click', () => document.getElementById('lightbox').classList.remove('open'));
-    document.querySelector('#lightbox .prev').addEventListener('click', () => movePlot(-1));
-    document.querySelector('#lightbox .next').addEventListener('click', () => movePlot(1));
-    document.getElementById('lightbox').addEventListener('click', event => {{ if (event.target.id === 'lightbox') event.currentTarget.classList.remove('open'); }});
-    document.addEventListener('keydown', event => {{ if (event.key === 'Escape') document.getElementById('lightbox').classList.remove('open'); if (event.key === 'ArrowLeft') movePlot(-1); if (event.key === 'ArrowRight') movePlot(1); }});
-    document.getElementById('lastRefreshed').textContent = data.lastRefreshed;
-    renderLinks(document.getElementById('globalLinks'), data.globalLinks);
-    document.querySelectorAll('a[href="#newWorkflowPanel"]').forEach(anchor => anchor.addEventListener('click', () => {{
-      const panel = document.getElementById('newWorkflowPanel');
-      if (panel) panel.open = true;
-    }}));
-    renderSummary(); renderList(); renderDetail();
-    document.querySelector('.job-button.active')?.scrollIntoView({{block: 'nearest'}});
+    {DASHBOARD_SCRIPT}
   </script>
 </body>
 </html>
